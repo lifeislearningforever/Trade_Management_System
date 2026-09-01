@@ -468,6 +468,17 @@ class Command(BaseCommand):
         for position, pos_src in positions:
             basis = position.get('position_basis') or position.get('pos_basis') or 'SETTLED'
 
+            # Pass the FOUND position's own position_date, not the cash flow's
+            # payment_date, into the accumulate/reduce helpers below. Both
+            # feed into the golden-copy position_id hash (position_id_service),
+            # which includes position_date -- using payment_date there instead
+            # of the row's actual position_date produces a genuinely different
+            # position_id than the one the trade flow already created for this
+            # natural key, silently spawning a second live INT row for the
+            # same portfolio/security/basis with the accumulated field (e.g.
+            # dividend_fc) sitting on the wrong one -- observed for
+            # UOBS_CIU_FVE_REIT/CLAS SP: two SETTLED INT position_ids, one
+            # with dividend_fc=0, one with the real accumulated value.
             common = dict(
                 cf_type=cf_type, cf_id=cf_id, cf_number=cf_number,
                 amount_fc=amount_fc, amount_lc=amount_lc,
@@ -477,35 +488,35 @@ class Command(BaseCommand):
 
             if cf_type in ('UNCALL_COMMITMENT',):
                 ok, msg = self._accumulate_field(
-                    position, portfolio, security, payment_date,
+                    position, portfolio, security, position.get('position_date') or payment_date,
                     fc_field='uncall_fc', lc_field='uncall_lc',
                     delta_fc=signed_fc, delta_lc=signed_lc, **common
                 )
 
             elif cf_type in ('PROVISION',):
                 ok, msg = self._accumulate_field(
-                    position, portfolio, security, payment_date,
+                    position, portfolio, security, position.get('position_date') or payment_date,
                     fc_field='provision_fc', lc_field='provision_lc',
                     delta_fc=signed_fc, delta_lc=signed_lc, **common
                 )
 
             elif cf_type in ('PIPELINE',):
                 ok, msg = self._accumulate_field(
-                    position, portfolio, security, payment_date,
+                    position, portfolio, security, position.get('position_date') or payment_date,
                     fc_field='pipeline_fc', lc_field='pipeline_lc',
                     delta_fc=signed_fc, delta_lc=signed_lc, **common
                 )
 
             elif cf_type in ('YTD_REALISE',):
                 ok, msg = self._accumulate_field(
-                    position, portfolio, security, payment_date,
+                    position, portfolio, security, position.get('position_date') or payment_date,
                     fc_field='realized_pnl_fc', lc_field='realized_pnl_lc',
                     delta_fc=signed_fc, delta_lc=signed_lc, **common
                 )
 
             elif cf_type in ('INCOME_DISTRIBUTION',):
                 ok, msg = self._accumulate_field(
-                    position, portfolio, security, payment_date,
+                    position, portfolio, security, position.get('position_date') or payment_date,
                     fc_field='realized_pnl_fc', lc_field='realized_pnl_lc',
                     delta_fc=signed_fc, delta_lc=signed_lc, **common
                 )
@@ -514,7 +525,7 @@ class Command(BaseCommand):
                 # Same shared _sign() convention as every other type: INCREASE
                 # increases dividend_fc/lc, DECREASE decreases it.
                 ok, msg = self._accumulate_field(
-                    position, portfolio, security, payment_date,
+                    position, portfolio, security, position.get('position_date') or payment_date,
                     fc_field='dividend_fc', lc_field='dividend_lc',
                     delta_fc=signed_fc, delta_lc=signed_lc, **common
                 )
@@ -528,7 +539,7 @@ class Command(BaseCommand):
                 # ("got multiple values for keyword argument 'amount_fc'").
                 common_no_amount = {k: v for k, v in common.items() if k not in ('amount_fc', 'amount_lc')}
                 ok, msg = self._reduce_avp(
-                    position, portfolio, security, payment_date,
+                    position, portfolio, security, position.get('position_date') or payment_date,
                     amount_fc=signed_fc, amount_lc=signed_lc,
                     raw_amount_fc=amount_fc, raw_amount_lc=amount_lc,
                     **common_no_amount

@@ -124,6 +124,10 @@
                                 {% elif upload.status == 'ETL_RUNNING' %}
                                     <span class="spinner-border spinner-border-sm text-primary me-2"></span>
                                     <span class="fs-5 text-primary">Position ETL Running...</span>
+                                    <button type="button" id="stop-etl-btn" class="btn btn-outline-danger btn-sm ms-3"
+                                            onclick="stopEtl('{{ upload.upload_id }}')">
+                                        <i class="bi bi-stop-circle"></i> Stop
+                                    </button>
                                 {% elif upload.status == 'ETL_COMPLETE' %}
                                     <span class="status-indicator bg-success"></span>
                                     <span class="ms-2 fs-5 text-success">ETL Complete</span>
@@ -861,7 +865,7 @@ $(document).ready(function() {
                     if (data.status === 'COMPLETED' || data.status === 'INGESTED' || data.status === 'ETL_COMPLETE') {
                         clearInterval(_pollTimer);
                         markComplete(true);
-                    } else if (data.status === 'FAILED' || data.status === 'VALIDATION_FAILED') {
+                    } else if (data.status === 'FAILED' || data.status === 'VALIDATION_FAILED' || data.status === 'CANCELLED') {
                         clearInterval(_pollTimer);
                         markComplete(false);
                     } else if (data.status === 'INGESTING' || data.status === 'ETL_RUNNING') {
@@ -880,6 +884,56 @@ $(document).ready(function() {
     })();
     {% endif %}
 });
+
+// Stop button for an in-progress Position ETL. Cooperative cancellation --
+// signals the running background thread to stop at its next step boundary
+// (see api_cancel_etl / EtlCancelled in upload_service.py); doesn't kill an
+// Impala query already in flight, so the button disables itself and shows
+// a "Stopping..." state rather than instantly reflecting CANCELLED, which
+// the 3s status poll (above) will pick up once the thread actually exits.
+function _getCsrfCookie() {
+    var m = document.cookie.match(/(?:^|;\s*)csrftoken=([^;]+)/);
+    return m ? decodeURIComponent(m[1]) : '';
+}
+
+var CANCEL_ETL_URL_TEMPLATE = "{% url 'upload:api_cancel_etl' 'UPLOAD_ID_PLACEHOLDER' %}";
+
+function stopEtl(uploadId) {
+    if (!confirm('Stop this ETL run? Progress made in the current step will be discarded, and its staging tables will be cleaned up.')) {
+        return;
+    }
+    var btn = document.getElementById('stop-etl-btn');
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Stopping...';
+    }
+    var url = CANCEL_ETL_URL_TEMPLATE.replace('UPLOAD_ID_PLACEHOLDER', uploadId);
+    fetch(url, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'X-CSRFToken': _getCsrfCookie() },
+    })
+        .then(function(r) { return r.json().then(function(data) { return { ok: r.ok, data: data }; }); })
+        .then(function(res) {
+            if (!res.ok) {
+                alert('Could not stop ETL: ' + (res.data.error || 'Unknown error'));
+                if (btn) {
+                    btn.disabled = false;
+                    btn.innerHTML = '<i class="bi bi-stop-circle"></i> Stop';
+                }
+                return;
+            }
+            // Leave the button disabled — the status poll will reload the
+            // page once it observes CANCELLED.
+        })
+        .catch(function() {
+            alert('Network error while requesting Stop — the ETL may still be running.');
+            if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="bi bi-stop-circle"></i> Stop';
+            }
+        });
+}
 
 // Keep the header and sidebar "auto-create security" checkboxes in sync,
 // since only one of the two forms actually gets submitted (whichever the

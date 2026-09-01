@@ -28,6 +28,61 @@ from ..repositories.datasource_repository import datasource_repository
 logger = logging.getLogger('upload')
 
 
+# ---------------------------------------------------------------------------
+# ETL cancellation registry
+# ---------------------------------------------------------------------------
+# Lets the "Stop" button on the upload detail page signal a running
+# background ETL thread (started via a bare threading.Thread in
+# upload/views.py, not Celery) to stop between staging steps rather than
+# running to completion or hanging indefinitely. A plain in-process dict is
+# sufficient here since the thread and the request that can cancel it always
+# run in the same process/worker.
+import threading as _etl_threading
+
+_etl_cancel_events: Dict[str, '_etl_threading.Event'] = {}
+_etl_cancel_lock = _etl_threading.Lock()
+
+
+class EtlCancelled(Exception):
+    """Raised inside run_position_etl when a Stop request is observed between steps."""
+    pass
+
+
+def register_etl_run(upload_id: str) -> '_etl_threading.Event':
+    """Create and register a cancellation Event for a new ETL run. Call this
+    right before starting the background thread; pass nothing further into
+    run_position_etl itself -- it looks itself up by upload_id."""
+    ev = _etl_threading.Event()
+    with _etl_cancel_lock:
+        _etl_cancel_events[upload_id] = ev
+    return ev
+
+
+def unregister_etl_run(upload_id: str) -> None:
+    """Remove the cancellation Event once a run has finished (success, failure,
+    or cancellation) so the registry doesn't grow unbounded."""
+    with _etl_cancel_lock:
+        _etl_cancel_events.pop(upload_id, None)
+
+
+def request_etl_cancel(upload_id: str) -> bool:
+    """Signal a running ETL to stop at its next step boundary.
+    Returns True if a live run was found and signalled, False if there was
+    nothing registered for this upload_id (e.g. it already finished)."""
+    with _etl_cancel_lock:
+        ev = _etl_cancel_events.get(upload_id)
+    if ev is None:
+        return False
+    ev.set()
+    return True
+
+
+def is_etl_cancel_requested(upload_id: str) -> bool:
+    with _etl_cancel_lock:
+        ev = _etl_cancel_events.get(upload_id)
+    return ev.is_set() if ev is not None else False
+
+
 @dataclass
 class FileValidationResult:
     """Result of file validation."""
@@ -2424,7 +2479,7 @@ class UploadService:
           True to opt in to auto-creating new securities AND parties (Step 5C).
 
         Runs the Hive/Impala equivalent of position_upload_transform_optimized.sql:
-          Step 1 — build pos_stage_1_base from position_upload_standardized
+          Step 1 — build pos_stage_1_base_{ETL_SFX} from position_upload_standardized
           Step 2 — portfolio validation
           Step 3 — security ISIN match
           Step 4 — security fallback match
@@ -2477,6 +2532,23 @@ class UploadService:
 
             db = settings.IMPALA_CONFIG['DATABASE']
 
+            # Namespaces every pos_stage_* staging table by upload_id so two
+            # concurrent ETL runs never collide on the same physical Kudu
+            # table (previously all runs shared fixed table names like
+            # pos_stage_1_base -- a second upload's DROP/CREATE TABLE against
+            # the same name could block indefinitely on a lock held by a
+            # first, possibly-dead, run; a 30-hour-stuck upload was traced to
+            # exactly this). Sanitized to a valid identifier fragment since
+            # upload_id may contain hyphens or other characters Impala/Kudu
+            # table names don't allow unquoted.
+            import re as _etl_re
+            ETL_SFX = _etl_re.sub(r'[^A-Za-z0-9]', '_', str(upload_id))[:40]
+
+            # Register this run so the "Stop" button (see api_cancel_etl in
+            # upload/views.py) can signal it. _step_time checks this after
+            # every step and raises EtlCancelled if a Stop was requested.
+            register_etl_run(upload_id)
+
             # ETL steps in order — used to compute % progress for the UI progress bar.
             _ETL_STEPS = [
                 'Step 0', 'Step 1', 'Step 2', 'Step 3', 'Step 4',
@@ -2503,7 +2575,32 @@ class UploadService:
                     }, persist=False)
                 except Exception:
                     pass
+                # Checked once per step (not mid-step) -- a Stop request takes
+                # effect at the next natural step boundary rather than
+                # interrupting an in-flight Impala query.
+                if is_etl_cancel_requested(upload_id):
+                    raise EtlCancelled(f"Stopped by user after: {label}")
                 return _etl_time.time()
+
+            def _cleanup_staging_tables() -> None:
+                """Drop this run's namespaced staging tables. Shared by the
+                normal completion path and the Stop/cancel path -- on cancel
+                these tables would otherwise be orphaned in Kudu forever
+                (no other job ever revisits a specific upload_id's tables)."""
+                for tbl in [
+                    f'pos_stage_1_base_{ETL_SFX}', f'pos_stage_1b_country_{ETL_SFX}', f'pos_stage_2_portfolio_{ETL_SFX}',
+                    f'pos_stage_3_security_{ETL_SFX}',
+                    f'pos_stage_4_security_fallback_{ETL_SFX}', f'pos_stage_4b_abbrev_match_{ETL_SFX}',
+                    f'pos_stage_4_tier_update_{ETL_SFX}', f'pos_stage_4_collision_update_{ETL_SFX}',
+                    f'pos_stage_5_price_{ETL_SFX}', f'pos_stage_5b_candidates_{ETL_SFX}',
+                    'position_upload_staging',
+                ]:
+                    try:
+                        impala_manager.execute_write(
+                            f"DROP TABLE IF EXISTS {tbl}", database=db
+                        )
+                    except Exception:
+                        pass
 
             def _count(table: str, where: str = '') -> int:
                 """Return COUNT(*) from a staging table; -1 on error (non-fatal)."""
@@ -2537,7 +2634,7 @@ class UploadService:
                 """Log up to `limit` failing rows — portfolio + security + reason.
 
                 `from_clause` lets callers whose table lacks a bare
-                portfolio/isin column (e.g. pos_stage_4_security_fallback,
+                portfolio/isin column (e.g. pos_stage_4_security_fallback_<suffix>,
                 which only has row_id + upload_isin) supply a JOIN back to a
                 table that has it, with matching *_expr overrides.
                 """
@@ -3621,7 +3718,7 @@ class UploadService:
             except RuntimeError as _s1_err:
                 return False, str(_s1_err), result
             impala_manager.execute_write(
-                "DROP TABLE IF EXISTS pos_stage_1_base", database=db
+                f"DROP TABLE IF EXISTS pos_stage_1_base_{ETL_SFX}", database=db
             )
             ok = impala_manager.execute_write(
                 f"""
@@ -3738,8 +3835,8 @@ class UploadService:
                 database=db
             )
             if not ok:
-                return False, "Step 1 CREATE TABLE pos_stage_1_base failed — check Impala logs (likely column mismatch in position_upload_standardized)", result
-            _s1_rows = _count('pos_stage_1_base')
+                return False, f"Step 1 CREATE TABLE pos_stage_1_base_{ETL_SFX} failed — check Impala logs (likely column mismatch in position_upload_standardized)", result
+            _s1_rows = _count(f'pos_stage_1_base_{ETL_SFX}')
             logger.info(f"[position_etl] Step 1 complete — {_s1_rows} rows in pos_stage_1_base")
             _t = _step_time("Step 1 (base staging)", _t)
 
@@ -3828,7 +3925,7 @@ class UploadService:
                         return f"CASE {_branches} ELSE {col} END AS {col}"
 
                     impala_manager.execute_write(
-                        "DROP TABLE IF EXISTS pos_stage_1b_country", database=db
+                        f"DROP TABLE IF EXISTS pos_stage_1b_country_{ETL_SFX}", database=db
                     )
                     impala_manager.execute_write(
                         f"""
@@ -3857,15 +3954,15 @@ class UploadService:
                         database=db
                     )
                     impala_manager.execute_write(
-                        "DROP TABLE IF EXISTS pos_stage_1_base", database=db
+                        f"DROP TABLE IF EXISTS pos_stage_1_base_{ETL_SFX}", database=db
                     )
                     impala_manager.execute_write(
-                        "CREATE TABLE pos_stage_1_base STORED AS PARQUET AS "
-                        "SELECT * FROM pos_stage_1b_country",
+                        f"CREATE TABLE pos_stage_1_base_{ETL_SFX} STORED AS PARQUET AS "
+                        f"SELECT * FROM pos_stage_1b_country_{ETL_SFX}",
                         database=db
                     )
                     impala_manager.execute_write(
-                        "DROP TABLE IF EXISTS pos_stage_1b_country", database=db
+                        f"DROP TABLE IF EXISTS pos_stage_1b_country_{ETL_SFX}", database=db
                     )
                     logger.info(
                         f"[position_etl] Step 1B: resolved country full-name -> code "
@@ -3877,7 +3974,7 @@ class UploadService:
             # Step 2: Portfolio validation — join on pf.name (exact match)
             # ------------------------------------------------------------------
             impala_manager.execute_write(
-                "DROP TABLE IF EXISTS pos_stage_2_portfolio", database=db
+                f"DROP TABLE IF EXISTS pos_stage_2_portfolio_{ETL_SFX}", database=db
             )
             impala_manager.execute_write(
                 f"""
@@ -3897,13 +3994,13 @@ class UploadService:
                 """,
                 database=db
             )
-            _s2_bd = _breakdown('pos_stage_2_portfolio', 'portfolio_status')
-            _s2_fail = _count('pos_stage_2_portfolio', "portfolio_status LIKE 'FAIL%'")
+            _s2_bd = _breakdown(f'pos_stage_2_portfolio_{ETL_SFX}', 'portfolio_status')
+            _s2_fail = _count(f'pos_stage_2_portfolio_{ETL_SFX}', "portfolio_status LIKE 'FAIL%'")
             logger.info(f"[position_etl] Step 2 complete — portfolio validation: {_s2_bd}")
             if _s2_fail > 0:
                 try:
                     _pf_rows = impala_manager.execute_query(
-                        "SELECT DISTINCT portfolio FROM pos_stage_2_portfolio "
+                        f"SELECT DISTINCT portfolio FROM pos_stage_2_portfolio_{ETL_SFX} "
                         "WHERE portfolio_status LIKE 'FAIL%' LIMIT 10",
                         database=db
                     )
@@ -3987,7 +4084,7 @@ class UploadService:
                 return _cache
 
             def _apply_python_tier_result(matches: dict, multi_ids: set, tier_name: str, status_suffix: str = '_MATCH') -> None:
-                """Recreate pos_stage_4_security_fallback, applying Python-computed
+                """Recreate pos_stage_4_security_fallback_<suffix>, applying Python-computed
                 tier results (matches / multi-match fails) to rows currently
                 'PENDING'; every other row's existing result passes through
                 unchanged. Impala Parquet tables are immutable — recreate in
@@ -4000,7 +4097,7 @@ class UploadService:
                     for rid, c in matches.items()
                 ) or "WHEN 1 = 0 THEN NULL"
                 impala_manager.execute_write(
-                    "DROP TABLE IF EXISTS pos_stage_4_tier_update", database=db
+                    f"DROP TABLE IF EXISTS pos_stage_4_tier_update_{ETL_SFX}", database=db
                 )
                 impala_manager.execute_write(
                     f"""
@@ -4032,7 +4129,7 @@ class UploadService:
                     database=db
                 )
                 impala_manager.execute_write(
-                    "DROP TABLE IF EXISTS pos_stage_4_security_fallback", database=db
+                    f"DROP TABLE IF EXISTS pos_stage_4_security_fallback_{ETL_SFX}", database=db
                 )
                 impala_manager.execute_write(
                     f"""
@@ -4065,16 +4162,16 @@ class UploadService:
                     database=db
                 )
                 impala_manager.execute_write(
-                    "DROP TABLE IF EXISTS pos_stage_4_tier_update", database=db
+                    f"DROP TABLE IF EXISTS pos_stage_4_tier_update_{ETL_SFX}", database=db
                 )
 
             # ---- Stage A (SQL): Tier 1 Short Name, Tier 2 ISIN+Country,
             #      Tier 3 Ticker+Country, Tier 4 Full Name(description)+Country ----
             impala_manager.execute_write(
-                "DROP TABLE IF EXISTS pos_stage_3_security", database=db
+                f"DROP TABLE IF EXISTS pos_stage_3_security_{ETL_SFX}", database=db
             )
             impala_manager.execute_write(
-                "DROP TABLE IF EXISTS pos_stage_4_security_fallback", database=db
+                f"DROP TABLE IF EXISTS pos_stage_4_security_fallback_{ETL_SFX}", database=db
             )
             impala_manager.execute_write(
                 f"""
@@ -4270,7 +4367,7 @@ class UploadService:
                 """,
                 database=db
             )
-            _s34a_bd = _breakdown('pos_stage_4_security_fallback', 'security_status')
+            _s34a_bd = _breakdown(f'pos_stage_4_security_fallback_{ETL_SFX}', 'security_status')
             logger.info(f"[position_etl] Step 3 Stage A (tiers 1-4) complete: {_s34a_bd}")
             _t = _step_time("Step 3 (ISIN match)", _t)
 
@@ -4282,7 +4379,7 @@ class UploadService:
             # without the suffix matches fine. Same fix as tiers 4/8/9.
             _pending_b = impala_manager.execute_query(
                 "SELECT row_id, desc_prefix, resolved_country "
-                "FROM pos_stage_4_security_fallback WHERE security_status = 'PENDING'",
+                f"FROM pos_stage_4_security_fallback_{ETL_SFX} WHERE security_status = 'PENDING'",
                 database=db
             ) or []
             if _pending_b:
@@ -4313,7 +4410,7 @@ class UploadService:
             # ---- Stage C (SQL): Tier 6 ISIN only, Tier 7 Ticker only, Tier 8 Full Name only
             #      (all three: country-blank fallback, see t6/t7/t8 comment below) ----
             impala_manager.execute_write(
-                "DROP TABLE IF EXISTS pos_stage_4_tier_update", database=db
+                f"DROP TABLE IF EXISTS pos_stage_4_tier_update_{ETL_SFX}", database=db
             )
             impala_manager.execute_write(
                 f"""
@@ -4440,17 +4537,17 @@ class UploadService:
                 database=db
             )
             impala_manager.execute_write(
-                "DROP TABLE IF EXISTS pos_stage_4_security_fallback", database=db
+                f"DROP TABLE IF EXISTS pos_stage_4_security_fallback_{ETL_SFX}", database=db
             )
             impala_manager.execute_write(
-                "CREATE TABLE pos_stage_4_security_fallback STORED AS PARQUET AS "
-                "SELECT * FROM pos_stage_4_tier_update",
+                f"CREATE TABLE pos_stage_4_security_fallback_{ETL_SFX} STORED AS PARQUET AS "
+                f"SELECT * FROM pos_stage_4_tier_update_{ETL_SFX}",
                 database=db
             )
             impala_manager.execute_write(
-                "DROP TABLE IF EXISTS pos_stage_4_tier_update", database=db
+                f"DROP TABLE IF EXISTS pos_stage_4_tier_update_{ETL_SFX}", database=db
             )
-            _s34c_bd = _breakdown('pos_stage_4_security_fallback', 'security_status')
+            _s34c_bd = _breakdown(f'pos_stage_4_security_fallback_{ETL_SFX}', 'security_status')
             logger.info(f"[position_etl] Step 4 Stage C (tiers 6-8) complete: {_s34c_bd}")
             _t = _step_time("Step 4 (security fallback)", _t)
 
@@ -4458,7 +4555,7 @@ class UploadService:
             # Uses desc_prefix -- see Stage B (Tier 5) comment above for why.
             _pending_d = impala_manager.execute_query(
                 "SELECT row_id, desc_prefix, resolved_country "
-                "FROM pos_stage_4_security_fallback WHERE security_status = 'PENDING'",
+                f"FROM pos_stage_4_security_fallback_{ETL_SFX} WHERE security_status = 'PENDING'",
                 database=db
             ) or []
             if _pending_d:
@@ -4483,11 +4580,11 @@ class UploadService:
 
             # ---- Tier 10: anything still PENDING is a create-security candidate ----
             impala_manager.execute_write(
-                "DROP TABLE IF EXISTS pos_stage_4_tier_update", database=db
+                f"DROP TABLE IF EXISTS pos_stage_4_tier_update_{ETL_SFX}", database=db
             )
             impala_manager.execute_write(
-                """
-                CREATE TABLE pos_stage_4_tier_update
+                f"""
+                CREATE TABLE pos_stage_4_tier_update_{ETL_SFX}
                 STORED AS PARQUET AS
                 SELECT
                     row_id, upload_isin, security_full_name, security_short_name,
@@ -4496,33 +4593,33 @@ class UploadService:
                     final_country, final_currency,
                     CASE WHEN security_status = 'PENDING' THEN 'NONE' ELSE security_match_method END AS security_match_method,
                     CASE WHEN security_status = 'PENDING' THEN 'NOT_FOUND: Create new security' ELSE security_status END AS security_status
-                FROM pos_stage_4_security_fallback
+                FROM pos_stage_4_security_fallback_{ETL_SFX}
                 """,
                 database=db
             )
             impala_manager.execute_write(
-                "DROP TABLE IF EXISTS pos_stage_4_security_fallback", database=db
+                f"DROP TABLE IF EXISTS pos_stage_4_security_fallback_{ETL_SFX}", database=db
             )
             impala_manager.execute_write(
-                "CREATE TABLE pos_stage_4_security_fallback STORED AS PARQUET AS "
-                "SELECT * FROM pos_stage_4_tier_update",
+                f"CREATE TABLE pos_stage_4_security_fallback_{ETL_SFX} STORED AS PARQUET AS "
+                f"SELECT * FROM pos_stage_4_tier_update_{ETL_SFX}",
                 database=db
             )
             impala_manager.execute_write(
-                "DROP TABLE IF EXISTS pos_stage_4_tier_update", database=db
+                f"DROP TABLE IF EXISTS pos_stage_4_tier_update_{ETL_SFX}", database=db
             )
-            _s4_bd = _breakdown('pos_stage_4_security_fallback', 'security_status')
+            _s4_bd = _breakdown(f'pos_stage_4_security_fallback_{ETL_SFX}', 'security_status')
             logger.info(f"[position_etl] Step 4 (10-tier cascade) complete: {_s4_bd}")
-            _s4_notfound = _count('pos_stage_4_security_fallback', "security_status = 'NOT_FOUND: Create new security'")
-            _s4_fail = _count('pos_stage_4_security_fallback', "security_status LIKE 'FAIL%'")
+            _s4_notfound = _count(f'pos_stage_4_security_fallback_{ETL_SFX}', "security_status = 'NOT_FOUND: Create new security'")
+            _s4_fail = _count(f'pos_stage_4_security_fallback_{ETL_SFX}', "security_status LIKE 'FAIL%'")
             if _s4_notfound > 0 or _s4_fail > 0:
                 _sample_fails(
-                    'pos_stage_4_security_fallback', 'security_status',
+                    f'pos_stage_4_security_fallback_{ETL_SFX}', 'security_status',
                     portfolio_expr='b.portfolio',
                     name_expr='p.security_full_name',
                     isin_expr='p.upload_isin',
-                    from_clause='pos_stage_4_security_fallback p '
-                                'JOIN pos_stage_1_base b ON p.row_id = b.row_id'
+                    from_clause=f'pos_stage_4_security_fallback_{ETL_SFX} p '
+                                f'JOIN pos_stage_1_base_{ETL_SFX} b ON p.row_id = b.row_id'
                 )
             _t = _step_time("Step 4B", _t)
 
@@ -4531,7 +4628,7 @@ class UploadService:
             #         Skip records with FAIL security status.
             # ------------------------------------------------------------------
             impala_manager.execute_write(
-                "DROP TABLE IF EXISTS pos_stage_5_price", database=db
+                f"DROP TABLE IF EXISTS pos_stage_5_price_{ETL_SFX}", database=db
             )
             ok_5 = impala_manager.execute_write(
                 f"""
@@ -4574,9 +4671,9 @@ class UploadService:
                 database=db
             )
             if not ok_5:
-                logger.error("[position_etl] Step 5 FAILED — pos_stage_5_price not created; aborting ETL")
-                return False, "Step 5 CREATE TABLE pos_stage_5_price failed", result
-            _s5_bd = _breakdown('pos_stage_5_price', 'price_status')
+                logger.error(f"[position_etl] Step 5 FAILED — pos_stage_5_price_{ETL_SFX} not created; aborting ETL")
+                return False, f"Step 5 CREATE TABLE pos_stage_5_price_{ETL_SFX} failed", result
+            _s5_bd = _breakdown(f'pos_stage_5_price_{ETL_SFX}', 'price_status')
             logger.info(f"[position_etl] Step 5 complete — price lookup: {_s5_bd}")
             _t = _step_time("Step 5 (price lookup)", _t)
 
@@ -4587,7 +4684,7 @@ class UploadService:
             #   5B-iii: INSERT into cis_security with abbreviated names
             # ------------------------------------------------------------------
             impala_manager.execute_write(
-                "DROP TABLE IF EXISTS pos_stage_5b_candidates", database=db
+                f"DROP TABLE IF EXISTS pos_stage_5b_candidates_{ETL_SFX}", database=db
             )
             impala_manager.execute_write(
                 f"""
@@ -4653,7 +4750,7 @@ class UploadService:
 
             # 5B-ii: fetch distinct candidates (rn=1), abbreviate security_name in Python
             _candidates = impala_manager.execute_query(
-                "SELECT * FROM pos_stage_5b_candidates WHERE rn = 1",
+                f"SELECT * FROM pos_stage_5b_candidates_{ETL_SFX} WHERE rn = 1",
                 database=db
             ) or []
 
@@ -4807,7 +4904,7 @@ class UploadService:
                     for rid, reason in _collision_rows.items()
                 )
                 impala_manager.execute_write(
-                    "DROP TABLE IF EXISTS pos_stage_4_collision_update", database=db
+                    f"DROP TABLE IF EXISTS pos_stage_4_collision_update_{ETL_SFX}", database=db
                 )
                 impala_manager.execute_write(
                     f"""
@@ -4824,15 +4921,15 @@ class UploadService:
                     database=db
                 )
                 impala_manager.execute_write(
-                    "DROP TABLE IF EXISTS pos_stage_4_security_fallback", database=db
+                    f"DROP TABLE IF EXISTS pos_stage_4_security_fallback_{ETL_SFX}", database=db
                 )
                 impala_manager.execute_write(
-                    "CREATE TABLE pos_stage_4_security_fallback STORED AS PARQUET AS "
-                    "SELECT * FROM pos_stage_4_collision_update",
+                    f"CREATE TABLE pos_stage_4_security_fallback_{ETL_SFX} STORED AS PARQUET AS "
+                    f"SELECT * FROM pos_stage_4_collision_update_{ETL_SFX}",
                     database=db
                 )
                 impala_manager.execute_write(
-                    "DROP TABLE IF EXISTS pos_stage_4_collision_update", database=db
+                    f"DROP TABLE IF EXISTS pos_stage_4_collision_update_{ETL_SFX}", database=db
                 )
                 logger.warning(
                     f"[position_etl] Step 5B: {len(_collision_rows)} row(s) blocked — "
@@ -5039,11 +5136,11 @@ class UploadService:
             # ------------------------------------------------------------------
             if not auto_create_security:
                 impala_manager.execute_write(
-                    "DROP TABLE IF EXISTS pos_stage_4_tier_update", database=db
+                    f"DROP TABLE IF EXISTS pos_stage_4_tier_update_{ETL_SFX}", database=db
                 )
                 impala_manager.execute_write(
-                    """
-                    CREATE TABLE pos_stage_4_tier_update
+                    f"""
+                    CREATE TABLE pos_stage_4_tier_update_{ETL_SFX}
                     STORED AS PARQUET AS
                     SELECT
                         row_id, upload_isin, security_full_name, security_short_name,
@@ -5055,23 +5152,23 @@ class UploadService:
                                 THEN 'FAIL: Security not found — auto-create disabled for this upload'
                             ELSE security_status
                         END AS security_status
-                    FROM pos_stage_4_security_fallback
+                    FROM pos_stage_4_security_fallback_{ETL_SFX}
                     """,
                     database=db
                 )
                 impala_manager.execute_write(
-                    "DROP TABLE IF EXISTS pos_stage_4_security_fallback", database=db
+                    f"DROP TABLE IF EXISTS pos_stage_4_security_fallback_{ETL_SFX}", database=db
                 )
                 impala_manager.execute_write(
-                    "CREATE TABLE pos_stage_4_security_fallback STORED AS PARQUET AS "
-                    "SELECT * FROM pos_stage_4_tier_update",
+                    f"CREATE TABLE pos_stage_4_security_fallback_{ETL_SFX} STORED AS PARQUET AS "
+                    f"SELECT * FROM pos_stage_4_tier_update_{ETL_SFX}",
                     database=db
                 )
                 impala_manager.execute_write(
-                    "DROP TABLE IF EXISTS pos_stage_4_tier_update", database=db
+                    f"DROP TABLE IF EXISTS pos_stage_4_tier_update_{ETL_SFX}", database=db
                 )
                 _notfound_failed = _count(
-                    'pos_stage_4_security_fallback',
+                    f'pos_stage_4_security_fallback_{ETL_SFX}',
                     "security_status LIKE 'FAIL: Security not found%'"
                 )
                 logger.info(
@@ -5915,20 +6012,7 @@ class UploadService:
                     result.update({'total': 0, 'passed': 0, 'failed': 0})
 
             # Clean up intermediate staging tables (keep report + failed for UI)
-            for tbl in [
-                'pos_stage_1_base', 'pos_stage_1b_country', 'pos_stage_2_portfolio',
-                'pos_stage_3_security',
-                'pos_stage_4_security_fallback', 'pos_stage_4b_abbrev_match',
-                'pos_stage_4_tier_update', 'pos_stage_4_collision_update',
-                'pos_stage_5_price', 'pos_stage_5b_candidates',
-                'position_upload_staging',
-            ]:
-                try:
-                    impala_manager.execute_write(
-                        f"DROP TABLE IF EXISTS {tbl}", database=db
-                    )
-                except Exception:
-                    pass
+            _cleanup_staging_tables()
 
             _total_elapsed = _etl_time.time() - _etl_t0
             msg = (
@@ -5947,6 +6031,20 @@ class UploadService:
             })
             return True, msg, result
 
+        except EtlCancelled as e:
+            logger.info(f"[position_etl] Cancelled by user: {e}")
+            try:
+                _cleanup_staging_tables()
+            except Exception as _cleanup_ex:
+                logger.warning(f"[position_etl] Cleanup after cancel failed: {_cleanup_ex}")
+            result['cancelled'] = True
+            msg = f"Position ETL cancelled by user: {e}"
+            notify_user(updated_by, EVT_UPLOAD_FAILED, {
+                **_notif_base,
+                'message': f'Position ETL cancelled for {src_id}',
+            })
+            return False, msg, result
+
         except Exception as e:
             logger.error(f"[position_etl] Error: {e}", exc_info=True)
             err_msg = f"Position ETL error: {e}"
@@ -5962,6 +6060,9 @@ class UploadService:
                 'message':      f'Upload ETL failure: src_id={src_id} user={updated_by} — {str(e)[:200]}',
             })
             return False, err_msg, result
+
+        finally:
+            unregister_etl_run(upload_id)
 
     def get_position_report(
         self,

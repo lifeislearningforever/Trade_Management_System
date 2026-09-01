@@ -21,7 +21,7 @@ from django.views.decorators.http import require_http_methods
 from django.conf import settings
 
 from core.audit.audit_kudu_repository import audit_log_kudu_repository
-from .services.upload_service import UploadService, FileValidationService
+from .services.upload_service import UploadService, FileValidationService, request_etl_cancel
 from .repositories.upload_kudu_repository import UploadKuduRepository
 
 logger = logging.getLogger('upload')
@@ -1413,6 +1413,45 @@ def api_upload_status(request, upload_id: str):
     })
 
 
+@require_http_methods(["POST"])
+def api_cancel_etl(request, upload_id: str):
+    """
+    API: Request cancellation of an in-progress position ETL run.
+
+    Cooperative, not a hard kill: sets a flag the running background thread
+    checks between staging steps (see EtlCancelled / _step_time in
+    upload_service.run_position_etl). A Stop request takes effect at the
+    next step boundary, not mid-query -- an Impala CTAS/DROP already in
+    flight when Stop is clicked still runs to completion, but the pipeline
+    won't proceed past it. On observing the cancellation, the ETL thread
+    drops its staging tables and marks the upload CANCELLED, so the user
+    isn't left staring at a status that never resolves.
+    """
+    upload = upload_service.get_upload_by_id(upload_id)
+    if not upload:
+        return JsonResponse({'error': 'Upload not found'}, status=404)
+
+    if upload.get('status') != UploadKuduRepository.STATUS_ETL_RUNNING:
+        return JsonResponse({
+            'error': 'No ETL is currently running for this upload',
+            'status': upload.get('status', ''),
+        }, status=400)
+
+    signalled = request_etl_cancel(upload_id)
+    if not signalled:
+        # The run already finished (or the worker restarted, dropping the
+        # in-memory registry) between the status check above and now --
+        # nothing to signal, but tell the caller plainly rather than
+        # claiming a stop was issued.
+        return JsonResponse({
+            'error': 'ETL is not currently trackable for cancellation (it may have just finished)',
+        }, status=409)
+
+    user_info = get_user_info(request)
+    logger.info(f"[etl:cancel] Stop requested by {user_info['username']} for upload_id={upload_id}")
+    return JsonResponse({'status': 'cancel_requested', 'upload_id': upload_id})
+
+
 @require_http_methods(["GET"])
 def api_table_preview(request, upload_id: str):
     """
@@ -1468,12 +1507,11 @@ def run_position_etl(request, upload_id: str):
 
     # Guard against a second overlapping ETL run for the same upload (double
     # click, page refresh re-POSTing the form, retried request, etc.). The
-    # ETL's staging tables (pos_stage_1_base, pos_stage_4_security_fallback,
-    # ...) are shared global names, not scoped per-run — if two runs overlap,
-    # the second run's Step 1 "DROP TABLE IF EXISTS pos_stage_1_base" can
-    # delete the table out from under the first run's later steps, producing
-    # a confusing "Could not resolve table reference" failure with no
-    # indication that a second run was ever triggered.
+    # ETL's staging tables are now namespaced per upload_id (pos_stage_1_base_
+    # <upload_id>, etc.) so a second run no longer collides with / drops a
+    # first run's tables out from under it -- this guard remains as a
+    # defense-in-depth UX guard (no point running the same ETL twice at once)
+    # rather than a correctness requirement.
     if upload.get('status') == UploadKuduRepository.STATUS_ETL_RUNNING:
         messages.warning(request, 'Position ETL is already running for this upload — please wait for it to finish.')
         return redirect('upload:detail', upload_id=upload_id)
@@ -1591,6 +1629,23 @@ def run_position_etl(request, upload_id: str):
                     'message': f'Position ETL complete for {_file_name}: {result.get("passed", 0)} passed, {result.get("failed", 0)} failed',
                 })
                 logger.info(f"[etl:bg] DONE upload_id={upload_id}: {msg}")
+            elif result.get('cancelled'):
+                logger.info(f"[etl:bg] CANCELLED upload_id={upload_id}: {msg}")
+                _cancel_note = f"ETL cancelled: {msg[:400]}"
+                _cancel_desc = f"{_orig_desc}\n{_cancel_note}".strip() if _orig_desc else _cancel_note
+                upload_service.repository.update_upload(
+                    upload_id,
+                    {'status': UploadKuduRepository.STATUS_CANCELLED,
+                     'description': _cancel_desc[:2000]},
+                    _username
+                )
+                _notify(_username, EVT_UPLOAD_FAILED, {
+                    'upload_id': upload_id,
+                    'file_name': _file_name,
+                    'src_id': _src_id,
+                    'processing_date': _proc_date,
+                    'message': f'Position ETL stopped for {_file_name}',
+                })
             else:
                 logger.error(f"[etl:bg] FAILED upload_id={upload_id}: {msg}")
                 _fail_note = f"ETL failed: {msg[:400]}"

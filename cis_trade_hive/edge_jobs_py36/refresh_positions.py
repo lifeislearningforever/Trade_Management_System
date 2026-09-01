@@ -8,8 +8,11 @@ For each position:
   1. Fetch latest price from cis_equity_price (always used; REVALUED and NON-REVALUED)
   2. If no price found: EOD/CORR keep existing market_value_fc (recalculate LC via
      latest FX rate); INT zeroes market_value_fc/lc instead of carrying it forward
-  3. unrealized_pnl = 0 if security_investment IN (ASSOC, SUBSI), else market_value_fc - cost_fc
+  3. unrealized_pnl = 0 if the portfolio's investment_type IN (SUBSIDIARY CO,
+     ASSOCIATED CO, RESTRUCTURED EQUITY-NEW), else market_value_fc - cost_fc
   4. NON-REVALUED: LC columns recalculated from FC × latest FX rate (no MTM override)
+     -- provision_lc now follows the exact same REVAL/NON-REVAL FX branch as
+     cost_lc (req 4), instead of always carrying the stored value forward
   5. net_book_value = cost + unrealized_pnl - provision
   6. Marks source row is_latest=false, inserts new EOD/CORR/INT row with is_latest=true.
 
@@ -123,6 +126,10 @@ DATABASE = settings.IMPALA_CONFIG['DATABASE']
 ALL_SOURCES = ['CIS', 'GMP', 'AMS_STREET', 'USER_UPLOAD']
 
 AVP_PRECISION = 8  # average cost is price-per-unit, not an amount — always 8 dp
+
+# Portfolio investment_type values carried at cost (equity method) -- no MTM.
+# Must match trade/services/position_service.py's EQUITY_METHOD_INVESTMENT_TYPES.
+EQUITY_METHOD_INVESTMENT_TYPES = ('SUBSIDIARY CO', 'ASSOCIATED CO', 'RESTRUCTURED EQUITY-NEW')
 
 
 class Command(BaseCommand):
@@ -536,21 +543,25 @@ class Command(BaseCommand):
         port_ccy     = port_info.get('currency')
         reval_status = (port_info.get('revaluation_status') or '').strip().upper()
         sec_ccy      = ref['sec_ccy'].get(security)
-        is_equity    = ref['equity_method'].get(security, False)
+        is_equity    = ref['equity_method'].get(portfolio, False)
         latest_price = ref['prices'].get(security)
         fx_pair      = f'{sec_ccy}-{port_ccy}' if sec_ccy and port_ccy and sec_ccy != port_ccy else None
         fx_rate      = ref['fx_rates'].get(fx_pair, Decimal('1')) if fx_pair else Decimal('1')
         fc_dp        = ref['currency_dp'].get(sec_ccy, 2)
         lc_dp        = ref['currency_dp'].get(port_ccy, 2)
 
-        # cost_lc rules (SA):
+        # cost_lc / provision_lc rules (SA, req 4) -- same FX treatment for both:
         #   NON-REVAL: always carry forward the as-traded LC (never recompute)
         #   REVAL: use latest FX rate if it is >= position_date (the traded date);
         #          otherwise keep the as-traded LC stored on the position
+        # Provision(LC) previously just carried the stored value forward
+        # unconditionally regardless of reval_status -- never FX-recomputed at
+        # all, unlike Cost(LC). Now mirrors the exact same branch.
         average_cost_fc = Decimal(str(position.get('average_cost_fc') or 0))
         if reval_status == 'NON-REVALUED':
-            average_cost_lc = Decimal(str(position.get('average_cost_lc') or 0))
-            cost_lc_write   = cost_lc_dec
+            average_cost_lc  = Decimal(str(position.get('average_cost_lc') or 0))
+            cost_lc_write    = cost_lc_dec
+            provision_lc_write = provision_lc
         else:
             # Determine whether the latest FX rate is more recent than the traded rate
             raw_pos_date = position.get('position_date')
@@ -562,12 +573,14 @@ class Command(BaseCommand):
 
             if fx_rate_date and pos_date_str and fx_rate_date >= pos_date_str:
                 # Latest FX rate is as-of or after the trade date — use it
-                average_cost_lc = round(average_cost_fc * fx_rate, AVP_PRECISION)
-                cost_lc_write   = round(cost_fc_dec * fx_rate, lc_dp)
+                average_cost_lc    = round(average_cost_fc * fx_rate, AVP_PRECISION)
+                cost_lc_write      = round(cost_fc_dec * fx_rate, lc_dp)
+                provision_lc_write = round(provision_fc * fx_rate, lc_dp)
             else:
                 # Latest FX rate predates the trade — keep as-traded LC
-                average_cost_lc = Decimal(str(position.get('average_cost_lc') or 0))
-                cost_lc_write   = cost_lc_dec
+                average_cost_lc    = Decimal(str(position.get('average_cost_lc') or 0))
+                cost_lc_write      = cost_lc_dec
+                provision_lc_write = provision_lc
 
         # Market value
         if latest_price is not None:
@@ -596,7 +609,7 @@ class Command(BaseCommand):
 
         # net_book_value = cost + unrealized_pnl - provision
         nbv_fc = round(cost_fc_dec + unrealized_pnl_fc - provision_fc, fc_dp)
-        nbv_lc = round(cost_lc_write + unrealized_pnl_lc - provision_lc, lc_dp)
+        nbv_lc = round(cost_lc_write + unrealized_pnl_lc - provision_lc_write, lc_dp)
 
         if not dry_run:
             insert_rows.append({
@@ -606,6 +619,7 @@ class Command(BaseCommand):
                 'unrealized_pnl_fc': unrealized_pnl_fc, 'unrealized_pnl_lc': unrealized_pnl_lc,
                 'nbv_fc': nbv_fc, 'nbv_lc': nbv_lc,
                 'average_cost_lc': average_cost_lc, 'cost_lc_write': cost_lc_write,
+                'provision_lc_write': provision_lc_write,
                 'fc_dp': fc_dp, 'lc_dp': lc_dp,
             })
 
@@ -648,6 +662,7 @@ class Command(BaseCommand):
                 'nbv_lc': Decimal(str(position.get('net_book_value_lc') or 0)),
                 'average_cost_lc': Decimal(str(position.get('average_cost_lc') or 0)),
                 'cost_lc_write': Decimal(str(position.get('cost_lc') or 0)),
+                'provision_lc_write': Decimal(str(position.get('provision_lc') or 0)),
                 'fc_dp': fc_dp, 'lc_dp': lc_dp,
             })
 
@@ -662,7 +677,10 @@ class Command(BaseCommand):
         Load all reference data needed for EOD revaluation in ~6 queries.
         Returns a dict with keys:
           sec_ccy        : {security_label: currency_code}
-          equity_method  : {security_label: bool}  (True if ASSOC/SUBSI)
+          equity_method  : {portfolio: bool}  (True if the PORTFOLIO's investment_type
+                           is SUBSIDIARY CO / ASSOCIATED CO / RESTRUCTURED EQUITY-NEW —
+                           equity-method treatment is a portfolio-level attribute, not
+                           a per-security one)
           port_info      : {portfolio: {currency, revaluation_status}}
           prices         : {security_label: Decimal}  (latest closing price)
           fx_rates       : {'SEC-PORT': Decimal}  (spot_rate_d)
@@ -687,38 +705,38 @@ class Command(BaseCommand):
         def _placeholders(items):
             return ', '.join(['%s'] * len(items))
 
-        # 1. Securities: currency_code + security_investment
+        # 1. Securities: currency_code
         # Bound as query params (not string-interpolated) — security names can
         # contain apostrophes (e.g. "CD INT'L ENT"), and PyHive's SQL parser
         # rejects escaped '' quotes inside long IN (...) literal lists.
         if securities:
             rows = impala_manager.execute_query(
-                f"SELECT security_name, currency_code, security_investment "
+                f"SELECT security_name, currency_code "
                 f"FROM {DATABASE}.cis_security "
                 f"WHERE security_name IN ({_placeholders(securities)})",
                 securities,
                 database=DATABASE
             ) or []
             for r in rows:
-                lbl = r.get('security_name')
-                ref['sec_ccy'][lbl] = r.get('currency_code')
-                inv = (r.get('security_investment') or '').upper()
-                ref['equity_method'][lbl] = inv in ('ASSOC', 'SUBSI')
+                ref['sec_ccy'][r.get('security_name')] = r.get('currency_code')
 
-        # 2. Portfolios: currency + revaluation_status
+        # 2. Portfolios: currency + revaluation_status + investment_type
         if portfolios:
             rows = impala_manager.execute_query(
-                f"SELECT name, currency, revaluation_status "
+                f"SELECT name, currency, revaluation_status, investment_type "
                 f"FROM {DATABASE}.cis_portfolio "
                 f"WHERE name IN ({_placeholders(portfolios)})",
                 portfolios,
                 database=DATABASE
             ) or []
             for r in rows:
-                ref['port_info'][r.get('name')] = {
+                name = r.get('name')
+                ref['port_info'][name] = {
                     'currency': r.get('currency'),
                     'revaluation_status': r.get('revaluation_status'),
                 }
+                inv = (r.get('investment_type') or '').upper()
+                ref['equity_method'][name] = inv in EQUITY_METHOD_INVESTMENT_TYPES
 
         # 3. Latest closing prices for all securities
         if securities:
@@ -964,6 +982,7 @@ class Command(BaseCommand):
             lc_dp         = row['lc_dp']
             avg_cost_lc   = row['average_cost_lc']
             cost_lc_write = row['cost_lc_write']
+            provision_lc_write = row['provision_lc_write']
             mkt_fc        = row['market_value_fc']
             mkt_lc        = row['market_value_lc']
             upnl_fc       = row['unrealized_pnl_fc']
@@ -1008,10 +1027,18 @@ class Command(BaseCommand):
             # the same delta so it stays internally consistent with whatever
             # provision value actually gets written below, instead of nbv and
             # provision silently disagreeing on this row.
+            #
+            # provision_lc specifically falls back to provision_lc_write (the
+            # req-4 FX-recomputed value from _process_position), not the raw
+            # source position's stale provision_lc -- same fallback swap
+            # cost_lc/cost_lc_write already gets, so a first-time write (no
+            # existing row to carry from) picks up the FX-recomputed value
+            # instead of whatever was last stored.
             _carried_prov_fc = Decimal(str(_carry('provision_fc', 0) or 0))
-            _carried_prov_lc = Decimal(str(_carry('provision_lc', 0) or 0))
+            _carried_prov_lc_raw = existing.get('provision_lc')
+            _carried_prov_lc = Decimal(str(_carried_prov_lc_raw)) if _carried_prov_lc_raw is not None else Decimal(str(provision_lc_write))
             _source_prov_fc  = Decimal(str(position.get('provision_fc') or 0))
-            _source_prov_lc  = Decimal(str(position.get('provision_lc') or 0))
+            _source_prov_lc  = Decimal(str(provision_lc_write))
             nbv_fc = round(Decimal(str(nbv_fc)) + _source_prov_fc - _carried_prov_fc, fc_dp)
             nbv_lc = round(Decimal(str(nbv_lc)) + _source_prov_lc - _carried_prov_lc, lc_dp)
 
@@ -1036,7 +1063,7 @@ class Command(BaseCommand):
                 f"{float(round(nbv_fc, fc_dp))}, {float(round(nbv_lc, lc_dp))}, "
                 f"{float(round(upnl_fc, fc_dp))}, {float(round(upnl_lc, lc_dp))}, "
                 f"{fc(_carry('realized_pnl_fc'))}, {lc(_carry('realized_pnl_lc'))}, "
-                f"{fc(_carry('provision_fc'))}, {lc(_carry('provision_lc'))}, "
+                f"{fc(_carry('provision_fc'))}, {lc(_carried_prov_lc)}, "
                 f"{fc(_carry('dividend_fc'))}, {lc(_carry('dividend_lc'))}, "
                 f"{fc(_carry('uncall_fc'))}, {lc(_carry('uncall_lc'))}, "
                 f"{fc(_carry('pipeline_fc'))}, {lc(_carry('pipeline_lc'))}, "

@@ -66,10 +66,14 @@ class PositionRepository:
         """Build shared WHERE conditions. position_type accepts str or list."""
         e = self._escape
         conditions = []
-        # Position Viewer shows current state, not history -- without this,
-        # superseded rows left behind by pre-fix duplicate position_ids (or
-        # any other is_latest=false row) show up alongside the current one.
-        conditions.append(f"({prefix}is_latest = true OR {prefix}is_latest IS NULL)")
+        # Position Viewer shows ALL position records (full history), not just
+        # is_latest=true -- previously every query was hard-scoped to
+        # is_latest=true (or NULL), which hid every prior version/date for a
+        # natural key. That also silently broke date-range filtering on this
+        # screen: since is_latest advances forward with every day's
+        # processing, only the newest row per natural key ever qualified,
+        # so a date_from/date_to filter on a past date returned nothing even
+        # when the position genuinely existed on that date.
         if portfolios and len(portfolios) == 1:
             conditions.append(f"UPPER({prefix}portfolio) LIKE '%{e(portfolios[0].upper())}%'")
         elif portfolios and len(portfolios) > 1:
@@ -151,6 +155,7 @@ class PositionRepository:
                     pos.uncall_fc, pos.uncall_lc,
                     pos.pipeline_fc, pos.pipeline_lc,
                     pos.position_type,
+                    pos.is_latest,
                     pos.isin,
                     pos.processing_timestamp,
                     COALESCE(p.revaluation_status, '') AS revaluation_status,
