@@ -1297,6 +1297,7 @@ def trade_settle(request, trade_id):
     return redirect('trade:detail', trade_id=trade_id)
 
 
+@require_login
 def trade_cancel(request, trade_id):
     """Cancel trade — always requires checker approval (Four-Eyes / PENDING_CANCELLATION).
     Position effect is immediate: is_deleted=true + chain recalc run now so the
@@ -1383,6 +1384,12 @@ def trade_approve_cancellation(request, trade_id):
     user_info = get_user_info(request)
     comments = request.POST.get('comments', '').strip()
 
+    # Four-eyes check — checker cannot be the same person who requested the cancellation
+    cancelled_by = trade_data.get('cancelled_by', '')
+    if cancelled_by and cancelled_by == user_info['username']:
+        messages.error(request, 'Four-eyes principle: You cannot approve your own cancellation request.')
+        return redirect('trade:detail', trade_id=trade_id)
+
     try:
         success = trade_kudu_repository.approve_cancellation(trade_id, user_info['username'], comments)
         if not success:
@@ -1429,6 +1436,12 @@ def trade_reject_cancellation(request, trade_id):
 
     user_info = get_user_info(request)
     comments = request.POST.get('comments', '').strip()
+
+    # Four-eyes check — checker cannot be the same person who requested the cancellation
+    cancelled_by = trade_data.get('cancelled_by', '')
+    if cancelled_by and cancelled_by == user_info['username']:
+        messages.error(request, 'Four-eyes principle: You cannot reject your own cancellation request.')
+        return redirect('trade:detail', trade_id=trade_id)
 
     try:
         # Restores is_deleted=false, is_active=true and reverts status.

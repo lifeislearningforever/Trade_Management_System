@@ -1,6 +1,7 @@
 # Trade Cancel — Maker/Checker (Four-Eyes) Gap
 
-**Status:** Open — for SA review, not yet fixed.
+**Status:** Fixed. Implemented per SA discussion — maker≠checker guard added
+to both cancellation checker views, `@require_login` added to `trade_cancel`.
 
 ## Question
 
@@ -46,12 +47,23 @@ Also: `trade_cancel()` (the maker action) is missing the `@require_login`
 decorator that both checker views (`trade_approve_cancellation`,
 `trade_reject_cancellation`) carry.
 
-## Suggested fix (pending SA sign-off)
+## Fix implemented
 
-- Add the same maker≠checker guard to both checker views, comparing
-  `cancelled_by` (or `trade_data.get('cancelled_by')`) against the acting
-  user, mirroring the `trade_validate()` check.
-- Add `@require_login` to `trade_cancel()`.
+- Added the maker≠checker guard to both `trade_approve_cancellation()` and
+  `trade_reject_cancellation()`, comparing `trade_data.get('cancelled_by')`
+  against the acting user's `username`, mirroring the `trade_validate()`
+  check:
+  ```python
+  cancelled_by = trade_data.get('cancelled_by', '')
+  if cancelled_by and cancelled_by == user_info['username']:
+      messages.error(request, 'Four-eyes principle: You cannot approve your own cancellation request.')
+      return redirect('trade:detail', trade_id=trade_id)
+  ```
+- Added `@require_login` to `trade_cancel()`.
+- Verified `get_trade_by_id()` already selects `cancelled_by` (used at three
+  places in `trade_kudu_repository.py`), so no repository change needed.
+- Ran `trade/tests/test_views.py` before and after — same 5 pre-existing
+  failures either way (unrelated stale mocks), no regressions introduced.
 
 ## Files involved
 
