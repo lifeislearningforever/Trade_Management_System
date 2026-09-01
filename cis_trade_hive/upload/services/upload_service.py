@@ -3722,7 +3722,7 @@ class UploadService:
             )
             ok = impala_manager.execute_write(
                 f"""
-                CREATE TABLE pos_stage_1_base
+                CREATE TABLE pos_stage_1_base_{ETL_SFX}
                 STORED AS PARQUET AS
                 SELECT
                     ROW_NUMBER() OVER (ORDER BY portfolio, security_full_name) AS row_id,
@@ -3891,7 +3891,7 @@ class UploadService:
                 _country_cols = ('country_of_exchange', 'country_of_incorporation',
                                   'country_of_risk', 'country_of_operation')
                 _s1b_rows = impala_manager.execute_query(
-                    f"SELECT row_id, {', '.join(_country_cols)} FROM pos_stage_1_base",
+                    f"SELECT row_id, {', '.join(_country_cols)} FROM pos_stage_1_base_{ETL_SFX}",
                     database=db
                 ) or []
 
@@ -3929,7 +3929,7 @@ class UploadService:
                     )
                     impala_manager.execute_write(
                         f"""
-                        CREATE TABLE pos_stage_1b_country
+                        CREATE TABLE pos_stage_1b_country_{ETL_SFX}
                         STORED AS PARQUET AS
                         SELECT
                             row_id, portfolio, security_full_name, security_short_name,
@@ -3949,7 +3949,7 @@ class UploadService:
                             position_basis, reporting_date, maturity_date, src_system,
                             sub_system, data_cat, data_frq, source_table, etl_insert_ts,
                             etl_batch_id, src_id, processing_date
-                        FROM pos_stage_1_base
+                        FROM pos_stage_1_base_{ETL_SFX}
                         """,
                         database=db
                     )
@@ -3978,7 +3978,7 @@ class UploadService:
             )
             impala_manager.execute_write(
                 f"""
-                CREATE TABLE pos_stage_2_portfolio
+                CREATE TABLE pos_stage_2_portfolio_{ETL_SFX}
                 STORED AS PARQUET AS
                 SELECT
                     b.row_id,
@@ -3989,7 +3989,7 @@ class UploadService:
                         WHEN pf.name IS NOT NULL THEN 'PASS'
                         ELSE 'FAIL: Portfolio not found in cis_portfolio'
                     END AS portfolio_status
-                FROM pos_stage_1_base b
+                FROM pos_stage_1_base_{ETL_SFX} b
                 LEFT JOIN {db}.cis_portfolio pf ON b.portfolio = pf.name
                 """,
                 database=db
@@ -4101,7 +4101,7 @@ class UploadService:
                 )
                 impala_manager.execute_write(
                     f"""
-                    CREATE TABLE pos_stage_4_tier_update
+                    CREATE TABLE pos_stage_4_tier_update_{ETL_SFX}
                     STORED AS PARQUET AS
                     SELECT
                         p.row_id, p.upload_isin, p.security_full_name, p.security_short_name,
@@ -4124,7 +4124,7 @@ class UploadService:
                             WHEN p.row_id IN ({_multi_ids_sql}) THEN 'MULTI'
                             ELSE 'UNCHANGED'
                         END AS tier_outcome
-                    FROM pos_stage_4_security_fallback p
+                    FROM pos_stage_4_security_fallback_{ETL_SFX} p
                     """,
                     database=db
                 )
@@ -4133,7 +4133,7 @@ class UploadService:
                 )
                 impala_manager.execute_write(
                     f"""
-                    CREATE TABLE pos_stage_4_security_fallback
+                    CREATE TABLE pos_stage_4_security_fallback_{ETL_SFX}
                     STORED AS PARQUET AS
                     SELECT
                         u.row_id, u.upload_isin, u.security_full_name, u.security_short_name,
@@ -4155,7 +4155,7 @@ class UploadService:
                             WHEN u.tier_outcome = 'MULTI'   THEN 'FAIL: MULTIPLE_MATCH_{tier_name}'
                             ELSE u.prev_status
                         END AS security_status
-                    FROM pos_stage_4_tier_update u
+                    FROM pos_stage_4_tier_update_{ETL_SFX} u
                     LEFT JOIN {db}.cis_security sn
                         ON u.tier_outcome = 'MATCHED' AND sn.security_id = u.matched_security_id
                     """,
@@ -4175,7 +4175,7 @@ class UploadService:
             )
             impala_manager.execute_write(
                 f"""
-                CREATE TABLE pos_stage_4_security_fallback
+                CREATE TABLE pos_stage_4_security_fallback_{ETL_SFX}
                 STORED AS PARQUET AS
                 WITH
                 -- Resolve exchange_quoted → country at query time via LUT.
@@ -4220,8 +4220,8 @@ class UploadService:
                                 ELSE b.security_full_name
                             END
                         ) AS desc_prefix
-                    FROM pos_stage_1_base b
-                    JOIN pos_stage_2_portfolio p2
+                    FROM pos_stage_1_base_{ETL_SFX} b
+                    JOIN pos_stage_2_portfolio_{ETL_SFX} p2
                         ON b.row_id = p2.row_id AND p2.portfolio_status = 'PASS'
                     LEFT JOIN lut_dedup lut
                         ON UPPER(TRIM(b.`exchange`)) = lut.exchange_name
@@ -4414,11 +4414,11 @@ class UploadService:
             )
             impala_manager.execute_write(
                 f"""
-                CREATE TABLE pos_stage_4_tier_update
+                CREATE TABLE pos_stage_4_tier_update_{ETL_SFX}
                 STORED AS PARQUET AS
                 WITH
                 pending AS (
-                    SELECT * FROM pos_stage_4_security_fallback WHERE security_status = 'PENDING'
+                    SELECT * FROM pos_stage_4_security_fallback_{ETL_SFX} WHERE security_status = 'PENDING'
                 ),
                 -- Tiers 6/7/8 are the ISIN-only / Ticker-only / Full-Name-only
                 -- fallback for rows whose upload country was genuinely blank (SA
@@ -4531,7 +4531,7 @@ class UploadService:
                     desc_prefix, upload_exchange, portfolio_status, resolved_country, clean_ticker,
                     final_security_id, final_security_name, final_isin, final_exchange,
                     final_country, final_currency, security_match_method, security_status
-                FROM pos_stage_4_security_fallback
+                FROM pos_stage_4_security_fallback_{ETL_SFX}
                 WHERE security_status != 'PENDING'
                 """,
                 database=db
@@ -4632,7 +4632,7 @@ class UploadService:
             )
             ok_5 = impala_manager.execute_write(
                 f"""
-                CREATE TABLE pos_stage_5_price
+                CREATE TABLE pos_stage_5_price_{ETL_SFX}
                 STORED AS PARQUET AS
                 SELECT
                     b.row_id,
@@ -4656,8 +4656,8 @@ class UploadService:
                             THEN 'WARN: Price is zero (omitted)'
                         ELSE 'WARN: No price'
                     END AS price_status
-                FROM pos_stage_1_base b
-                JOIN pos_stage_4_security_fallback p4 ON b.row_id = p4.row_id
+                FROM pos_stage_1_base_{ETL_SFX} b
+                JOIN pos_stage_4_security_fallback_{ETL_SFX} p4 ON b.row_id = p4.row_id
                 LEFT JOIN (
                     SELECT isin, price_date, main_closing_price,
                            ROW_NUMBER() OVER (PARTITION BY isin, price_date ORDER BY price_timestamp DESC) AS rn
@@ -4688,7 +4688,7 @@ class UploadService:
             )
             impala_manager.execute_write(
                 f"""
-                CREATE TABLE pos_stage_5b_candidates
+                CREATE TABLE pos_stage_5b_candidates_{ETL_SFX}
                 STORED AS PARQUET AS
                 SELECT
                     -- Raw name (pre-abbreviation) — Python will abbreviate this.
@@ -4729,9 +4729,9 @@ class UploadService:
                         )))
                         ORDER BY b.row_id
                     ) AS rn
-                FROM pos_stage_1_base b
-                JOIN pos_stage_4_security_fallback p4 ON b.row_id = p4.row_id
-                JOIN pos_stage_2_portfolio p2
+                FROM pos_stage_1_base_{ETL_SFX} b
+                JOIN pos_stage_4_security_fallback_{ETL_SFX} p4 ON b.row_id = p4.row_id
+                JOIN pos_stage_2_portfolio_{ETL_SFX} p2
                     ON b.row_id = p2.row_id AND p2.portfolio_status = 'PASS'
                 WHERE p4.security_status = 'NOT_FOUND: Create new security'
                   AND (b.quantity IS NOT NULL OR b.cost_fc IS NOT NULL)
@@ -4908,7 +4908,7 @@ class UploadService:
                 )
                 impala_manager.execute_write(
                     f"""
-                    CREATE TABLE pos_stage_4_collision_update
+                    CREATE TABLE pos_stage_4_collision_update_{ETL_SFX}
                     STORED AS PARQUET AS
                     SELECT
                         row_id, upload_isin, security_full_name, security_short_name,
@@ -4916,7 +4916,7 @@ class UploadService:
                         clean_ticker, final_security_id, final_security_name, final_isin,
                         final_exchange, final_country, final_currency, security_match_method,
                         CASE {_coll_when} ELSE security_status END AS security_status
-                    FROM pos_stage_4_security_fallback
+                    FROM pos_stage_4_security_fallback_{ETL_SFX}
                     """,
                     database=db
                 )
@@ -4997,8 +4997,8 @@ class UploadService:
                     SELECT DISTINCT s.issuer AS raw_issuer_name,
                            b.industry, b.issuer_type,
                            b.country_of_incorporation, b.cels
-                    FROM pos_stage_4_security_fallback p4
-                    JOIN pos_stage_1_base b ON b.row_id = p4.row_id
+                    FROM pos_stage_4_security_fallback_{ETL_SFX} p4
+                    JOIN pos_stage_1_base_{ETL_SFX} b ON b.row_id = p4.row_id
                     JOIN {db}.cis_security s ON s.security_id = p4.final_security_id
                     WHERE p4.final_security_id IS NOT NULL
                       AND s.issuer IS NOT NULL
@@ -5250,11 +5250,11 @@ class UploadService:
                             THEN CONCAT('INVALID: ', p4.security_status)
                         ELSE 'VALID'
                     END AS overall_status
-                FROM pos_stage_1_base b
-                JOIN pos_stage_2_portfolio p2
+                FROM pos_stage_1_base_{ETL_SFX} b
+                JOIN pos_stage_2_portfolio_{ETL_SFX} p2
                     ON b.row_id = p2.row_id AND p2.portfolio_status = 'PASS'
-                JOIN pos_stage_4_security_fallback p4 ON b.row_id = p4.row_id
-                LEFT JOIN pos_stage_5_price p5 ON b.row_id = p5.row_id
+                JOIN pos_stage_4_security_fallback_{ETL_SFX} p4 ON b.row_id = p4.row_id
+                LEFT JOIN pos_stage_5_price_{ETL_SFX} p5 ON b.row_id = p5.row_id
 
                 UNION ALL
 
@@ -5290,8 +5290,8 @@ class UploadService:
                         'INVALID: ',
                         regexp_replace(p2.portfolio_status, '^FAIL: ', '')
                     ) AS overall_status
-                FROM pos_stage_1_base b
-                JOIN pos_stage_2_portfolio p2
+                FROM pos_stage_1_base_{ETL_SFX} b
+                JOIN pos_stage_2_portfolio_{ETL_SFX} p2
                     ON b.row_id = p2.row_id AND p2.portfolio_status != 'PASS'
                 """,
                 database=db
@@ -5357,8 +5357,8 @@ class UploadService:
                             THEN 'NO_QUANTITY'
                         ELSE 'OTHER'
                     END AS fail_category
-                FROM pos_stage_1_base b
-                LEFT JOIN pos_stage_2_portfolio p2 ON b.row_id = p2.row_id
+                FROM pos_stage_1_base_{ETL_SFX} b
+                LEFT JOIN pos_stage_2_portfolio_{ETL_SFX} p2 ON b.row_id = p2.row_id
                 WHERE p2.portfolio_status LIKE 'FAIL%'
                    OR ((b.isin IS NULL OR TRIM(b.isin) = '')
                        AND (b.security_full_name IS NULL OR TRIM(b.security_full_name) = '')
