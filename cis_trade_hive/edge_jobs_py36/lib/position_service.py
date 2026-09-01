@@ -34,7 +34,8 @@ class PositionService:
     Service for calculating positions using weighted average method.
 
     AVP Formula:
-    - BUY:  new_avg_cost = (old_total_cost + trade_cost + charges) / new_quantity
+    - BUY:  new_avg_cost = (old_total_cost + trade_cost) / new_quantity
+            (charges excluded from cost basis — P&L item, not cost basis, SA PORTIARP-8206)
     - SELL: avg_cost unchanged, realized P&L = (sell_price - avg_cost) * quantity
     """
 
