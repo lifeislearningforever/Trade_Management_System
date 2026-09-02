@@ -2593,7 +2593,7 @@ class UploadService:
                     f'pos_stage_4_security_fallback_{ETL_SFX}', f'pos_stage_4b_abbrev_match_{ETL_SFX}',
                     f'pos_stage_4_tier_update_{ETL_SFX}', f'pos_stage_4_collision_update_{ETL_SFX}',
                     f'pos_stage_5_price_{ETL_SFX}', f'pos_stage_5b_candidates_{ETL_SFX}',
-                    'position_upload_staging',
+                    f'position_upload_staging_{ETL_SFX}',
                 ]:
                     try:
                         impala_manager.execute_write(
@@ -5183,11 +5183,11 @@ class UploadService:
             #         Also create position_upload_failed for reporting.
             # ------------------------------------------------------------------
             impala_manager.execute_write(
-                "DROP TABLE IF EXISTS position_upload_staging", database=db
+                f"DROP TABLE IF EXISTS position_upload_staging_{ETL_SFX}", database=db
             )
             impala_manager.execute_write(
                 f"""
-                CREATE TABLE position_upload_staging
+                CREATE TABLE position_upload_staging_{ETL_SFX}
                 STORED AS PARQUET AS
                 SELECT
                     b.*,
@@ -5296,13 +5296,13 @@ class UploadService:
                 """,
                 database=db
             )
-            _s6_bd = _breakdown('position_upload_staging', 'overall_status')
-            _s6_total = _count('position_upload_staging')
+            _s6_bd = _breakdown(f'position_upload_staging_{ETL_SFX}', 'overall_status')
+            _s6_total = _count(f'position_upload_staging_{ETL_SFX}')
             logger.info(f"[position_etl] Step 6 complete — {_s6_total} rows in staging: {_s6_bd}")
-            _s6_invalid = _count('position_upload_staging', "overall_status LIKE 'INVALID%'")
-            _s6_valid   = _count('position_upload_staging', "overall_status LIKE 'VALID%'")
+            _s6_invalid = _count(f'position_upload_staging_{ETL_SFX}', "overall_status LIKE 'INVALID%'")
+            _s6_valid   = _count(f'position_upload_staging_{ETL_SFX}', "overall_status LIKE 'VALID%'")
             if _s6_invalid > 0:
-                _sample_fails('position_upload_staging', 'overall_status')
+                _sample_fails(f'position_upload_staging_{ETL_SFX}', 'overall_status')
             # Set pass/fail counts here from staging — this is the authoritative source.
             # position_upload_staging is fresh and correct at this point.
             # _s7b_pass from the report may be 0 if concurrent runs wipe the staging tables
@@ -5316,11 +5316,11 @@ class UploadService:
 
             # Failed records table (for reporting — records that never made it to staging)
             impala_manager.execute_write(
-                "DROP TABLE IF EXISTS position_upload_failed", database=db
+                f"DROP TABLE IF EXISTS position_upload_failed_{ETL_SFX}", database=db
             )
             impala_manager.execute_write(
                 f"""
-                CREATE TABLE position_upload_failed
+                CREATE TABLE position_upload_failed_{ETL_SFX}
                 STORED AS PARQUET AS
                 SELECT
                     b.*,
@@ -5367,7 +5367,7 @@ class UploadService:
                 """,
                 database=db
             )
-            _s6b_rows = _count('position_upload_failed')
+            _s6b_rows = _count(f'position_upload_failed_{ETL_SFX}')
             logger.info(f"[position_etl] Step 6B complete — {_s6b_rows} failed rows (portfolio/security reject)")
             _t = _step_time("Step 6B (failed table)", _t)
 
@@ -5380,7 +5380,7 @@ class UploadService:
             future_rows = impala_manager.execute_query(
                 f"""
                 SELECT COUNT(*) AS cnt
-                FROM position_upload_staging
+                FROM position_upload_staging_{ETL_SFX}
                 WHERE overall_status LIKE 'VALID%'
                   AND CAST(reporting_date AS STRING) > '{_today_iso_check}'
                 """,
@@ -5503,7 +5503,7 @@ class UploadService:
                     COALESCE(ep.pipeline_lc, CAST(0 AS DECIMAL(30,8))) AS pipeline_lc,
                     'INT'                                            AS position_type,
                     true                                             AS is_latest
-                FROM position_upload_staging s
+                FROM position_upload_staging_{ETL_SFX} s
                 LEFT JOIN (
                     SELECT
                         portfolio,
@@ -5531,7 +5531,7 @@ class UploadService:
             # Count valid rows from staging — this is exactly the number of rows
             # written to cis_position by this upload (before carry-forward adds more dates).
             _s7a_upserted = _count(
-                'position_upload_staging',
+                f'position_upload_staging_{ETL_SFX}',
                 "overall_status LIKE 'VALID%'"
             )
             result['cis_position_rows'] = max(_s7a_upserted, 0)
@@ -5561,7 +5561,7 @@ class UploadService:
                     COALESCE(s.matched_security_name, s.security_full_name, s.security_short_name) AS security_label,
                     s.position_basis,
                     MIN(CAST(s.reporting_date AS STRING)) AS upload_date
-                FROM {db}.position_upload_staging s
+                FROM {db}.position_upload_staging_{ETL_SFX} s
                 WHERE s.overall_status LIKE 'VALID%'
                   AND CAST(s.reporting_date AS STRING) < '{_calendar_today_iso}'
                 GROUP BY 1, 2, 3
@@ -5932,7 +5932,7 @@ class UploadService:
                     s.maturity_date,
                     s.src_system,
                     s.source_table
-                FROM position_upload_staging s
+                FROM position_upload_staging_{ETL_SFX} s
                 """,
                 database=db
             )
