@@ -644,8 +644,16 @@ class Command(BaseCommand):
 
         sec_ccy  = ref['sec_ccy'].get(security)
         port_ccy = ref['port_info'].get(portfolio, {}).get('currency')
-        fc_dp    = ref['currency_dp'].get(sec_ccy, 2)
-        lc_dp    = ref['currency_dp'].get(port_ccy, 2)
+        # "Copy forward exactly as stored" means exactly that -- _build_value
+        # rounds every fc/lc field to fc_dp/lc_dp before writing, which for a
+        # normal EOD/CORR/INT row is the currency's 2dp display precision.
+        # Applying that same 2dp rounding here would silently truncate a
+        # source value's real stored precision (e.g. 44.87684000 -> 44.88),
+        # which is exactly what "unchanged" is not supposed to do. Use
+        # AVP_PRECISION instead so the round() calls in _build_value are a
+        # no-op for any value already within cis_position's DECIMAL(20,8).
+        fc_dp    = AVP_PRECISION
+        lc_dp    = AVP_PRECISION
 
         market_value_fc = Decimal(str(position.get('market_value_fc') or 0))
         price_dec = (market_value_fc / qty) if qty else Decimal('0')
