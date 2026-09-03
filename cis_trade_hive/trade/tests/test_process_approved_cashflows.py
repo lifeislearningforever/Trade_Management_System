@@ -154,6 +154,52 @@ class TestProcessApprovedCashflowsSeedPositions:
         assert sql.startswith('INSERT INTO')
         sync_mock.assert_called_once()
 
+    def test_write_new_position_version_routes_golden_fallback_row_to_golden_even_when_src_is_cis(self):
+        """
+        Regression: a position found via the golden-copy fallback in
+        _get_current_positions (no cis_trade_position ledger row exists) is
+        still tagged pos_src=row['src_system'], which can be 'CIS'. Routing on
+        pos_src alone previously sent this into the ledger UPDATE/INSERT branch
+        using a version_id that was really just the golden position_id,
+        silently producing no new ledger version (the exact "TRADED never got
+        an INT row" bug reported live for UOBS_BCHAIN_FVE / UQ-UOB-102 CH).
+        The _from_ledger=False marker must force the golden-only path
+        regardless of pos_src.
+        """
+        current = {
+            'position_id': 12345,
+            'version_id': 12345,  # aliased from golden's position_id, NOT a real ledger version_id
+            'position_basis': 'TRADED',
+            'quantity': 1679,
+            'src_system': 'CIS',
+            '_from_ledger': False,
+        }
+
+        with patch.object(self.command, '_get_security_currency', return_value='CHF'), \
+             patch.object(self.command, '_get_portfolio_currency', return_value='SGD'), \
+             patch('trade.management.commands.process_approved_cashflows.impala_manager.execute_write') as write_sql, \
+             patch.object(self.command, '_sync_to_golden_position') as sync_mock:
+            success = self.command._write_new_position_version(
+                current=current,
+                portfolio='UOBS_BCHAIN_FVE',
+                security='UQ-UOB-102 CH',
+                position_date='2026-03-16',
+                cf_type='RETURN_OF_CAPITAL',
+                overrides={'total_cost_fc': 100.0},
+                cf_id=1,
+                cf_number='CF-20260902-00001',
+                cf_amount_fc=10.0,
+                cf_amount_lc=13.0,
+                fc_dp=2,
+                lc_dp=2,
+                pos_src='CIS',
+                run_type='EOD',
+            )
+
+        assert success is True
+        write_sql.assert_not_called()  # must not touch cis_trade_position at all
+        sync_mock.assert_called_once()
+
     def test_apply_to_position_return_of_capital_updates_settled_and_traded(self):
         positions = [
             ({'position_basis': 'SETTLED', 'quantity': 100}, 'CIS'),

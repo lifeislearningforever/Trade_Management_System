@@ -814,17 +814,29 @@ class Command(BaseCommand):
         run_type: str = 'EOD',
     ) -> bool:
         """
-        For CIS positions: mark current version is_latest=false, insert new version,
-        then sync to golden copy.
-        For non-CIS positions (GMP, AMSICEQ, USER_UPLOAD): skip cis_trade_position
-        entirely and write directly to cis_position (golden copy).
+        For positions actually versioned in cis_trade_position: mark current
+        version is_latest=false, insert new version, then sync to golden copy.
+        For positions with no ledger row (non-CIS sources GMP/AMSICEQ/USER_UPLOAD,
+        or a CIS-sourced position found only via the golden-copy fallback in
+        _get_current_positions — e.g. carried forward without ever getting a
+        ledger row): skip cis_trade_position entirely and write directly to
+        cis_position (golden copy).
         Writes position_type='CORR' when run_type='CORR', else 'INT' — either way
         the new row is marked is_latest=true (it becomes the base for the next run).
         """
         position_type = 'CORR' if run_type == 'CORR' else 'INT'
         try:
-            # Non-CIS: golden copy only — no cis_trade_position ledger for these sources
-            if pos_src != 'CIS':
+            # Route on whether this row actually has a cis_trade_position ledger
+            # entry -- NOT on pos_src/src_system. _get_current_positions tags a
+            # golden-fallback row with pos_src=row['src_system'], which can be
+            # 'CIS' even though there's no ledger row for it; treating that as
+            # "use the CIS ledger path" would UPDATE/INSERT cis_trade_position
+            # using a version_id that's really just the golden position_id,
+            # silently producing no new version. Default True (ledger path) for
+            # positions not sourced from _get_current_positions at all, e.g.
+            # _build_seed_position's freshly-built seed row.
+            from_ledger = current.get('_from_ledger', pos_src == 'CIS')
+            if not from_ledger:
                 self._sync_to_golden_position(
                     portfolio=portfolio,
                     security=security,
@@ -1292,7 +1304,9 @@ class Command(BaseCommand):
                 """
                 rows = impala_manager.execute_query(query, database=DATABASE)
                 if rows:
-                    selected_by_basis[basis] = (rows[0], 'CIS')
+                    row = rows[0]
+                    row['_from_ledger'] = True
+                    selected_by_basis[basis] = (row, 'CIS')
             except Exception as e:
                 logger.error(f'Error fetching CIS position for {portfolio}/{security} basis={basis}: {e}')
         if selected_by_basis and (not include_traded or len(selected_by_basis) == len(basis_order)):
@@ -1347,6 +1361,18 @@ class Command(BaseCommand):
                 rows = impala_manager.execute_query(golden_query, database=DATABASE)
                 if rows:
                     row = rows[0]
+                    # Mark explicitly: this row has no cis_trade_position ledger
+                    # entry (that's why we're here in the golden-copy fallback at
+                    # all) -- even when row['src_system'] == 'CIS' (a CIS-sourced
+                    # position that happens to only exist in the golden copy,
+                    # e.g. carried forward without ever getting a ledger row).
+                    # _write_new_position_version's ledger-vs-golden routing must
+                    # not confuse "src_system says CIS" with "this row actually
+                    # lives in cis_trade_position" -- doing so previously sent
+                    # such rows into the ledger UPDATE/INSERT branch using a
+                    # version_id that was really just the golden position_id,
+                    # silently failing to produce a new position version.
+                    row['_from_ledger'] = False
                     selected_by_basis[basis] = (row, row.get('src_system') or 'GMP')
                     golden_bases.append(basis)
             except Exception as e:
