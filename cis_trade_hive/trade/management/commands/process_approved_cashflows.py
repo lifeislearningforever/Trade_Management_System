@@ -750,7 +750,7 @@ class Command(BaseCommand):
             new_avp_lc = round(new_avp_fc * fx_rate, AVP_PRECISION)
             new_total_cost_lc = round(new_total_cost_fc * fx_rate, lc_dp)
 
-        is_equity_method = position_service._is_equity_method_security(security)
+        is_equity_method = position_service._is_equity_method_portfolio(portfolio)
         market_value_fc = Decimal(str(position.get('market_value_fc', 0) or 0))
         market_value_lc = Decimal(str(position.get('market_value_lc', 0) or 0))
         new_unrealized_pnl_fc = Decimal('0') if is_equity_method else round(market_value_fc - new_total_cost_fc, fc_dp)

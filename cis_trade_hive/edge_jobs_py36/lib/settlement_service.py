@@ -1416,7 +1416,7 @@ class SettlementService:
         ) if security_currency and portfolio_currency else Decimal(str(source.get('fx_rate') or 1))
 
         reval_status = self.position_service._get_portfolio_revaluation_status(portfolio_id)
-        is_equity_method = self.position_service._is_equity_method_security(security_id)
+        is_equity_method = self.position_service._is_equity_method_portfolio(portfolio_id)
 
         market_value_lc = float(market_value_fc or 0) * float(fx_rate)
         if reval_status == 'NON-REVALUED':

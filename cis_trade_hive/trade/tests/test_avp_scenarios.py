@@ -82,7 +82,7 @@ def _make_position_service():
     service._save_position = save_mock
     service._get_market_price = MagicMock(side_effect=lambda sec: None)  # fall back to trade price
     service._get_fx_rate = MagicMock(return_value=Decimal('1'))
-    service._is_equity_method_security = MagicMock(return_value=False)
+    service._is_equity_method_portfolio = MagicMock(return_value=False)
     return service, save_mock
 
 
