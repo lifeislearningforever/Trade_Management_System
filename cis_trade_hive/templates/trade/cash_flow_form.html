@@ -1,0 +1,638 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}{% if is_edit %}Edit{% else %}Create{% endif %} Cash Flow - CisTrade{% endblock %}
+
+{% block extra_css %}
+<!-- Select2 CSS - Local -->
+<link href="{% static 'css/select2.min.css' %}" rel="stylesheet" />
+<link href="{% static 'css/select2-bootstrap-5-theme.min.css' %}" rel="stylesheet" />
+<!-- CIS Trade Hive Select2 Custom Styles -->
+<link href="{% static 'css/select2-custom.css' %}" rel="stylesheet" />
+<style>
+/* Keep the closed selection pill compact — truncate if still too long */
+#portfolio_short_name + .select2-container .select2-selection__rendered,
+#security_name       + .select2-container .select2-selection__rendered {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: calc(100% - 30px);
+}
+/* Open dropdown: allow two-line items to breathe */
+.select2-results__option {
+    padding: 6px 10px !important;
+    line-height: 1.3;
+}
+/* Dropdown panel wide enough for full names */
+.select2-dropdown {
+    min-width: 320px;
+}
+</style>
+{% endblock %}
+
+{% block breadcrumb %}
+    <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
+    <li class="breadcrumb-item"><a href="{% url 'trade:list' %}">Trade</a></li>
+    <li class="breadcrumb-item"><a href="{% url 'trade:cash_flow_list' %}">Cash Flows</a></li>
+    <li class="breadcrumb-item active">{% if is_edit %}Edit{% else %}Create{% endif %}</li>
+{% endblock %}
+
+{% block content %}
+<div class="cash-flow-form-container" style="max-width: 1200px; margin: 0 auto;">
+    <!-- Page Header -->
+    <div class="content-header d-flex justify-content-between align-items-start mb-4">
+        <div>
+            <h1 class="content-title">
+                <i class="bi bi-{% if is_edit %}pencil{% else %}plus-circle{% endif %} text-primary"></i>
+                {% if is_edit %}Edit Cash Flow{% else %}Create New Cash Flow{% endif %}
+            </h1>
+            <p class="content-subtitle">
+                {% if is_edit %}
+                    Update cash flow: <strong>{{ cash_flow.cash_flow_number|default:"-" }}</strong>
+                {% else %}
+                    Fill in the cash flow details. Cash flow will be created with INITIAL status.
+                {% endif %}
+            </p>
+        </div>
+        <a href="{% url 'trade:cash_flow_list' %}" class="btn btn-outline-secondary">
+            <i class="bi bi-arrow-left"></i> Back to List
+        </a>
+    </div>
+
+    <!-- Form Card -->
+    <div class="card">
+        <div class="card-header">
+            <h5 class="card-title mb-0">
+                <i class="bi bi-info-circle"></i> Basic Info
+            </h5>
+        </div>
+        <div class="card-body">
+            <form method="post" class="needs-validation" novalidate>
+                {% csrf_token %}
+
+                <!-- Basic Cash Flow Information -->
+                <div class="mb-4">
+                    <h6 class="text-muted mb-3 border-bottom pb-2">
+                        <i class="bi bi-briefcase"></i> Basic Cash Flow Information
+                    </h6>
+                    <div class="row g-3">
+                        <!-- Portfolio (Required) -->
+                        <div class="col-md-6">
+                            <label for="portfolio_short_name" class="form-label">
+                                Portfolio <span class="text-danger">*</span>
+                            </label>
+                            <div class="input-group">
+                                <select class="form-select select2-portfolio"
+                                        id="portfolio_short_name"
+                                        name="portfolio_short_name"
+                                        required>
+                                    <option value="">Select Portfolio...</option>
+                                    {% for p in dropdown_options.portfolios %}
+                                        <option value="{{ p.value }}"
+                                                data-currency="{{ p.currency }}"
+                                                data-fullname="{{ p.full_name }}"
+                                                {% if cash_flow.portfolio_short_name == p.value %}selected{% endif %}>
+                                            {{ p.label }}
+                                        </option>
+                                    {% endfor %}
+                                </select>
+                                <span class="input-group-text" id="portfolio-validation-icon">
+                                    <i class="bi bi-question-circle text-muted"></i>
+                                </span>
+                            </div>
+                            <div id="portfolio-validation-message" class="form-text"></div>
+                            <div class="invalid-feedback">Portfolio is required</div>
+                        </div>
+
+                        <!-- Security (Required - provides Foreign Currency) -->
+                        <div class="col-md-6">
+                            <label for="security_name" class="form-label">
+                                Security <span class="text-danger">*</span>
+                            </label>
+                            <div class="input-group">
+                                <select class="form-select select2-security"
+                                        id="security_name"
+                                        name="security_name"
+                                        required>
+                                    <option value="">Select Security...</option>
+                                    {% for s in dropdown_options.securities %}
+                                        <option value="{{ s.value }}"
+                                                data-currency="{{ s.currency }}"
+                                                data-fullname="{{ s.full_name }}"
+                                                data-isin="{{ s.isin }}"
+                                                {% if cash_flow.security_label == s.value or cash_flow.security_name == s.value %}selected{% endif %}>
+                                            {% if s.full_name and s.full_name != s.label %}{{ s.full_name }} ({{ s.label }}){% else %}{{ s.label }}{% endif %}
+                                        </option>
+                                    {% endfor %}
+                                </select>
+                                <span class="input-group-text" id="security-validation-icon">
+                                    <i class="bi bi-question-circle text-muted"></i>
+                                </span>
+                            </div>
+                            <div id="security-validation-message" class="form-text"></div>
+                            <div class="invalid-feedback">Security is required</div>
+                        </div>
+
+                        <!-- Cash Flow Type (Required) -->
+                        <div class="col-md-4">
+                            <label for="cash_flow_type" class="form-label">
+                                Cash Flow Type <span class="text-danger">*</span>
+                            </label>
+                            <select class="form-select select2-cf-type"
+                                    id="cash_flow_type"
+                                    name="cash_flow_type"
+                                    required>
+                                <option value="">Select Type...</option>
+                                {% for cft in dropdown_options.cash_flow_types %}
+                                    <option value="{{ cft.value }}"
+                                            {% if cash_flow.cash_flow_type == cft.value %}selected{% endif %}>
+                                        {{ cft.label }}
+                                    </option>
+                                {% endfor %}
+                            </select>
+                            <div class="invalid-feedback">Cash Flow Type is required</div>
+                        </div>
+
+                        <!-- Increase / Decrease (item 6) -->
+                        <div class="col-md-4">
+                            <label for="send_receive" class="form-label">Increase / Decrease</label>
+                            <select class="form-select"
+                                    id="send_receive"
+                                    name="send_receive">
+                                <option value="">Select...</option>
+                                {% for sr in dropdown_options.send_receive_options %}
+                                    <option value="{{ sr.value }}"
+                                            {% if cash_flow.send_receive == sr.value %}selected{% endif %}>
+                                        {{ sr.label }}
+                                    </option>
+                                {% endfor %}
+                            </select>
+                        </div>
+
+                        <!-- Cash Flow Status (Hidden - managed by workflow) -->
+                        {% if is_edit %}
+                        <div class="col-md-4">
+                            <label class="form-label">Cash Flow Status</label>
+                            <input type="text"
+                                   class="form-control bg-light"
+                                   value="{{ cash_flow.cash_flow_status|default:'INITIAL' }}"
+                                   readonly>
+                            <small class="text-muted">Status managed by workflow</small>
+                        </div>
+                        {% endif %}
+                        <!-- Hidden input to preserve existing status on edit -->
+                        <input type="hidden" name="cash_flow_status" value="{{ cash_flow.cash_flow_status|default:'INITIAL' }}">
+                    </div>
+                </div>
+
+                <!-- Dates Section -->
+                <div class="mb-4">
+                    <h6 class="text-muted mb-3 border-bottom pb-2">
+                        <i class="bi bi-calendar3"></i> Dates
+                    </h6>
+                    <div class="row g-3">
+                        <!-- Value Date (Required) -->
+                        <div class="col-md-4">
+                            <label for="value_date" class="form-label">
+                                Value Date <span class="text-danger">*</span>
+                            </label>
+                            <input type="date"
+                                   class="form-control"
+                                   id="value_date"
+                                   name="value_date"
+                                   value="{{ cash_flow.value_date|default:'' }}"
+                                   required>
+                            <div class="invalid-feedback">Value date is required</div>
+                        </div>
+
+                        <!-- Payment Date (optional — item 3) -->
+                        <div class="col-md-4">
+                            <label for="payment_date" class="form-label">Payment Date</label>
+                            <input type="date"
+                                   class="form-control"
+                                   id="payment_date"
+                                   name="payment_date"
+                                   value="{{ cash_flow.payment_date|default:'' }}">
+                        </div>
+
+                        <!-- Dividend Date -->
+                        <div class="col-md-4">
+                            <label for="dividend_date" class="form-label">Dividend Date</label>
+                            <input type="date"
+                                   class="form-control"
+                                   id="dividend_date"
+                                   name="dividend_date"
+                                   value="{{ cash_flow.dividend_date|default:'' }}">
+                        </div>
+
+                        <!-- Ex Date -->
+                        <div class="col-md-4">
+                            <label for="ex_date" class="form-label">Ex Date</label>
+                            <input type="date"
+                                   class="form-control"
+                                   id="ex_date"
+                                   name="ex_date"
+                                   value="{{ cash_flow.ex_date|default:'' }}">
+                        </div>
+
+                        <!-- Record Date -->
+                        <div class="col-md-4">
+                            <label for="record_date" class="form-label">Record Date</label>
+                            <input type="date"
+                                   class="form-control"
+                                   id="record_date"
+                                   name="record_date"
+                                   value="{{ cash_flow.record_date|default:'' }}">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- GL & Amounts Section -->
+                <div class="mb-4">
+                    <h6 class="text-muted mb-3 border-bottom pb-2">
+                        <i class="bi bi-currency-dollar"></i> GL & Amounts
+                    </h6>
+                    <div class="row g-3">
+                        <!-- GL Acc No -->
+                        <div class="col-md-12">
+                            <label for="gl_acc_no" class="form-label">GL Acc no</label>
+                            <input type="text"
+                                   class="form-control"
+                                   id="gl_acc_no"
+                                   name="gl_acc_no"
+                                   value="{{ cash_flow.gl_acc_no|default:'' }}"
+                                   placeholder="Enter GL Account Number">
+                        </div>
+
+                        <!-- Local Currency (Auto-populated from Portfolio - Readonly) -->
+                        <div class="col-md-3">
+                            <label for="local_ccy" class="form-label">
+                                Local Ccy <span class="text-danger">*</span>
+                                <small class="text-muted">(Portfolio)</small>
+                            </label>
+                            <input type="text"
+                                   class="form-control bg-light"
+                                   id="local_ccy_display"
+                                   readonly
+                                   placeholder="Select Portfolio..."
+                                   value="{{ cash_flow.local_ccy|default:'' }}"
+                                   required>
+                            <input type="hidden" id="local_ccy" name="local_ccy" value="{{ cash_flow.local_ccy|default:'' }}" required>
+                            <div class="invalid-feedback">Local currency is required</div>
+                        </div>
+
+                        <!-- Local Amount (optional — item 8) -->
+                        <div class="col-md-3">
+                            <label for="local_amount" class="form-label">Local Amount</label>
+                            <input type="number"
+                                   class="form-control"
+                                   id="local_amount"
+                                   name="local_amount"
+                                   step="0.01"
+                                   value="{{ cash_flow.local_ccy_amt|default:'' }}"
+                                   placeholder="0.00">
+                        </div>
+
+                        <!-- Foreign Currency (Auto-populated from Security - Readonly) -->
+                        <div class="col-md-3">
+                            <label for="foreign_ccy" class="form-label">
+                                Foreign Ccy
+                                <small class="text-muted">(Security)</small>
+                            </label>
+                            <input type="text"
+                                   class="form-control bg-light"
+                                   id="foreign_ccy_display"
+                                   readonly
+                                   placeholder="Select Security..."
+                                   value="{{ cash_flow.foreign_ccy|default:'' }}">
+                            <input type="hidden" id="foreign_ccy" name="foreign_ccy" value="{{ cash_flow.foreign_ccy|default:'' }}">
+                        </div>
+
+                        <!-- Foreign Ccy Amount (optional — item 8) -->
+                        <div class="col-md-3">
+                            <label for="foreign_ccy_amount" class="form-label">Foreign Amount</label>
+                            <input type="number"
+                                   class="form-control"
+                                   id="foreign_ccy_amount"
+                                   name="foreign_ccy_amount"
+                                   step="0.01"
+                                   value="{{ cash_flow.foreign_ccy_amt|default:'' }}"
+                                   placeholder="0.00">
+                        </div>
+
+                        <!-- FX Rate (derived read-only: local / foreign) -->
+                        <div class="col-md-3">
+                            <label class="form-label">FX Rate <small class="text-muted">(derived)</small></label>
+                            <input type="text"
+                                   class="form-control bg-light"
+                                   id="cf_fx_rate_display"
+                                   readonly
+                                   placeholder="-"
+                                   value="{% if cash_flow.fx_rate %}{{ cash_flow.fx_rate|floatformat:7 }}{% endif %}">
+                            <small class="text-muted" id="cf_fx_rate_hint">Local ÷ Foreign</small>
+                        </div>
+
+                        <!-- Withholding Tax (item 9) -->
+                        <div class="col-md-3">
+                            <label for="withholding_tax_fc" class="form-label">
+                                Withholding Tax (FC)
+                            </label>
+                            <input type="number"
+                                   class="form-control"
+                                   id="withholding_tax_fc"
+                                   name="withholding_tax_fc"
+                                   step="0.000001"
+                                   value="{{ cash_flow.tax_deducted_fc|default:'' }}"
+                                   placeholder="0.00">
+                        </div>
+                        <div class="col-md-3">
+                            <label for="withholding_tax_lc" class="form-label">
+                                Withholding Tax (LC)
+                            </label>
+                            <input type="number"
+                                   class="form-control"
+                                   id="withholding_tax_lc"
+                                   name="withholding_tax_lc"
+                                   step="0.000001"
+                                   value="{{ cash_flow.tax_deducted_lc|default:'' }}"
+                                   placeholder="0.00">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- System Info for Edit Mode -->
+                {% if is_edit %}
+                <div class="mb-4">
+                    <h6 class="text-muted mb-3 border-bottom pb-2">
+                        <i class="bi bi-hash"></i> System Information
+                    </h6>
+                    <div class="row g-3">
+                        <div class="col-md-4">
+                            <label class="form-label">CF Number</label>
+                            <input type="text" class="form-control" value="{{ cash_flow.cash_flow_number|default:'' }}" readonly>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Workflow Status</label>
+                            <div>
+                                <span class="badge badge-{{ cash_flow.status|lower }} fs-6">
+                                    {{ cash_flow.status|default:'INITIAL' }}
+                                </span>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Source System</label>
+                            <div>
+                                <span class="badge badge-{% if cash_flow.src_system|upper == 'CIS' %}success{% else %}secondary{% endif %} fs-6">
+                                    {{ cash_flow.src_system|upper|default:'CIS' }}
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+
+                <!-- Remarks -->
+                <div class="card mb-3 mt-3">
+                    <div class="card-header py-2">
+                        <h5 class="card-title mb-0"><i class="bi bi-chat-left-text"></i> Remarks</h5>
+                    </div>
+                    <div class="card-body py-2">
+                        <textarea class="form-control" name="remarks" id="remarks" rows="2"
+                                  placeholder="Optional notes or remarks for this cash flow">{{ cash_flow.remarks|default:'' }}</textarea>
+                    </div>
+                </div>
+
+                <!-- Form Actions -->
+                <div class="d-flex justify-content-between gap-2 mt-4 pt-3 border-top">
+                    <a href="{% url 'trade:cash_flow_list' %}" class="btn btn-outline-secondary">
+                        <i class="bi bi-x-circle"></i> Cancel
+                    </a>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-check-circle"></i>
+                        {% if is_edit %}Update Cash Flow{% else %}Create Cash Flow{% endif %}
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Help Info -->
+    <div class="alert alert-info mt-4">
+        <i class="bi bi-info-circle"></i>
+        <strong>Note:</strong>
+        <ul class="mb-0 mt-2">
+            <li>CF Number is auto-generated when you create a new cash flow</li>
+            <li>Portfolio must be valid for trading (SETTLED status)</li>
+            <li>New cash flows are created with <strong>INITIAL</strong> status</li>
+            <li>A different user must approve the record (Four-Eyes Principle)</li>
+        </ul>
+    </div>
+</div>
+
+<!-- jQuery (required for Select2) - Local -->
+<script src="{% static 'js/jquery-3.7.1.min.js' %}"></script>
+
+<!-- Select2 JS - Local -->
+<script src="{% static 'js/select2.min.js' %}"></script>
+
+<!-- CIS Trade Hive Select2 Global Initialization -->
+<script src="{% static 'js/select2-init.js' %}"></script>
+
+<script>
+/* ── Two-line Select2 helpers ────────────────────────────────
+   templateResult  : shown in the open dropdown list
+   templateSelection: shown in the closed input (compact, shortname only)
+──────────────────────────────────────────────────────────── */
+function twoLineResult(item, subtextFn) {
+    if (!item.id) return item.text;   // placeholder
+    var el = item.element;
+    var sub = el ? ($(el).data('fullname') || '') : '';
+    if (!sub || sub === item.text) return $('<span><strong>' + item.text + '</strong></span>');
+    var $wrap = $(
+        '<span style="line-height:1.3;">' +
+            '<strong style="display:block;">' + item.text + '</strong>' +
+            '<small class="s2-subtext">' + sub + '</small>' +
+        '</span>'
+    );
+    return $wrap;
+}
+function shortNameSelection(item) {
+    // Closed pill: show only the shortname — return $element so Select2
+    // renders it correctly and change events still fire
+    return $('<span>' + (item.text || item.id || '') + '</span>');
+}
+
+// Initialize Select2 on all dropdowns
+$(document).ready(function() {
+    // Portfolio dropdown — two-line result, compact selection
+    // No dropdownParent: Select2 appends to <body> so it floats over other fields
+    $('#portfolio_short_name').select2({
+        theme: 'bootstrap-5',
+        placeholder: 'Search or select portfolio...',
+        allowClear: true,
+        width: '100%',
+        templateResult: twoLineResult,
+        templateSelection: shortNameSelection,
+    });
+
+    // Security dropdown — two-line result, compact selection
+    $('#security_name').select2({
+        theme: 'bootstrap-5',
+        placeholder: 'Search or select security...',
+        allowClear: true,
+        width: '100%',
+        templateResult: twoLineResult,
+        templateSelection: shortNameSelection,
+    });
+
+    // Initialize cash flow type dropdown
+    $('.select2-cf-type').each(function() {
+        CISSelect2.initElement($(this));
+    });
+
+    // Note: Currency fields are now readonly text inputs, no Select2 needed
+
+    // Portfolio validation on change - Auto-set Local Currency (readonly)
+    $('#portfolio_short_name').on('change', function() {
+        var portfolio = $(this).val();
+        if (portfolio) {
+            validatePortfolio(portfolio);
+            // Set local currency from portfolio (readonly field)
+            var selectedOption = $(this).find('option:selected');
+            var currency = selectedOption.data('currency');
+            if (currency) {
+                $('#local_ccy').val(currency);
+                $('#local_ccy_display').val(currency);
+            } else {
+                $('#local_ccy').val('');
+                $('#local_ccy_display').val('');
+            }
+        } else {
+            // Clear local currency if no portfolio selected
+            $('#local_ccy').val('');
+            $('#local_ccy_display').val('');
+        }
+    });
+
+    // Security validation on change - Auto-set Foreign Currency (readonly)
+    $('#security_name').on('change', function() {
+        var security = $(this).val();
+        if (security) {
+            validateSecurity(security);
+            // Set foreign currency from security (readonly field)
+            var selectedOption = $(this).find('option:selected');
+            var currency = selectedOption.data('currency');
+            if (currency) {
+                $('#foreign_ccy').val(currency);
+                $('#foreign_ccy_display').val(currency);
+            } else {
+                $('#foreign_ccy').val('');
+                $('#foreign_ccy_display').val('');
+            }
+        } else {
+            // Clear foreign currency if no security selected
+            $('#foreign_ccy').val('');
+            $('#foreign_ccy_display').val('');
+        }
+    });
+
+    // Trigger validation and currency auto-fill on page load for edit mode
+    {% if is_edit %}
+    var portfolio = $('#portfolio_short_name').val();
+    if (portfolio) {
+        validatePortfolio(portfolio);
+        // Set local currency display from selected portfolio
+        var portfolioCurrency = $('#portfolio_short_name option:selected').data('currency');
+        if (portfolioCurrency) {
+            $('#local_ccy_display').val(portfolioCurrency);
+        }
+    }
+    var security = $('#security_name').val();
+    if (security) {
+        validateSecurity(security);
+        // Set foreign currency display from selected security
+        var securityCurrency = $('#security_name option:selected').data('currency');
+        if (securityCurrency) {
+            $('#foreign_ccy_display').val(securityCurrency);
+        }
+    }
+    {% endif %}
+});
+
+function validatePortfolio(portfolio) {
+    $.ajax({
+        url: '{% url "trade:api_validate_cf_portfolio" %}',
+        data: { portfolio: portfolio },
+        success: function(data) {
+            var icon = $('#portfolio-validation-icon i');
+            var message = $('#portfolio-validation-message');
+
+            if (data.valid) {
+                icon.removeClass('bi-question-circle bi-x-circle text-muted text-danger')
+                    .addClass('bi-check-circle text-success');
+                message.removeClass('text-danger').addClass('text-success').text(data.message);
+            } else {
+                icon.removeClass('bi-question-circle bi-check-circle text-muted text-success')
+                    .addClass('bi-x-circle text-danger');
+                message.removeClass('text-success').addClass('text-danger').text(data.message);
+            }
+        }
+    });
+}
+
+function validateSecurity(security) {
+    $.ajax({
+        url: '{% url "trade:api_validate_cf_security" %}',
+        data: { security: security },
+        success: function(data) {
+            var icon = $('#security-validation-icon i');
+            var message = $('#security-validation-message');
+
+            if (data.valid) {
+                icon.removeClass('bi-question-circle bi-x-circle text-muted text-danger')
+                    .addClass('bi-check-circle text-success');
+                message.removeClass('text-danger').addClass('text-success').text(data.message);
+            } else {
+                icon.removeClass('bi-question-circle bi-check-circle text-muted text-success')
+                    .addClass('bi-x-circle text-danger');
+                message.removeClass('text-success').addClass('text-danger').text(data.message);
+            }
+        }
+    });
+}
+
+// Derived FX Rate display: local_amount / foreign_ccy_amount, shown to 7dp
+function updateCfFxRate() {
+    var local   = parseFloat(document.getElementById('local_amount').value)   || 0;
+    var foreign = parseFloat(document.getElementById('foreign_ccy_amount').value) || 0;
+    var display = document.getElementById('cf_fx_rate_display');
+    var hint    = document.getElementById('cf_fx_rate_hint');
+    if (!display) return;
+    if (foreign > 0 && local > 0) {
+        display.value = (local / foreign).toFixed(7);
+        if (hint) hint.textContent = 'Local ÷ Foreign';
+    } else {
+        display.value = '';
+        if (hint) hint.textContent = 'Enter both amounts';
+    }
+}
+document.getElementById('local_amount').addEventListener('input', updateCfFxRate);
+document.getElementById('foreign_ccy_amount').addEventListener('input', updateCfFxRate);
+updateCfFxRate();  // Populate on page load for edit mode
+
+// Client-side form validation
+(function() {
+    'use strict';
+    var forms = document.querySelectorAll('.needs-validation');
+    Array.prototype.slice.call(forms).forEach(function(form) {
+        form.addEventListener('submit', function(event) {
+            if (!form.checkValidity()) {
+                event.preventDefault();
+                event.stopPropagation();
+            }
+            form.classList.add('was-validated');
+        }, false);
+    });
+})();
+</script>
+{% endblock %}

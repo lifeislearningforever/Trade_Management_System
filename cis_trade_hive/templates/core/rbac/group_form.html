@@ -1,0 +1,73 @@
+{% extends 'base.html' %}
+
+{% block title %}{{ action }} Group - RBAC Admin{% endblock %}
+
+{% block breadcrumb %}
+    <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
+    <li class="breadcrumb-item"><a href="{% url 'core:rbac_dashboard' %}">RBAC Admin</a></li>
+    <li class="breadcrumb-item"><a href="{% url 'core:rbac_group_list' %}">Groups</a></li>
+    <li class="breadcrumb-item active">{{ action }}</li>
+{% endblock %}
+
+{% block content %}
+<div class="content-header">
+    <h1 class="content-title"><i class="bi bi-collection text-success"></i> {{ action }} Group</h1>
+</div>
+
+{% if messages %}
+<div class="mb-3">
+    {% for msg in messages %}
+    <div class="alert alert-{% if msg.tags == 'error' %}danger{% else %}{{ msg.tags }}{% endif %} alert-dismissible fade show py-2">
+        {{ msg }} <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
+<div class="card" style="max-width: 600px;">
+    <div class="card-body">
+        <form method="post">
+            {% csrf_token %}
+
+            <div class="mb-3">
+                <label class="form-label">Group Name <span class="text-danger">*</span></label>
+                <input type="text" name="group_name" class="form-control"
+                       value="{{ group.group_name|default:'' }}"
+                       placeholder="e.g. CIS-TRADERS" required>
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label">Description</label>
+                <textarea name="description" class="form-control" rows="2"
+                          placeholder="Brief description of this group's role">{{ group.description|default:'' }}</textarea>
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label">Entity</label>
+                <select name="entity" class="form-select">
+                    <option value="UOBS" {% if group.entity == 'UOBS' or not group %}selected{% endif %}>UOBS</option>
+                    <option value="UOBM" {% if group.entity == 'UOBM' %}selected{% endif %}>UOBM</option>
+                    <option value="UOBT" {% if group.entity == 'UOBT' %}selected{% endif %}>UOBT</option>
+                </select>
+            </div>
+
+            {% if action == 'Edit' %}
+            <div class="mb-3">
+                <label class="form-label">Status</label>
+                <select name="is_active" class="form-select">
+                    <option value="1" {% if group.is_active %}selected{% endif %}>Active</option>
+                    <option value="0" {% if not group.is_active %}selected{% endif %}>Inactive</option>
+                </select>
+            </div>
+            {% endif %}
+
+            <div class="d-flex gap-2">
+                <button type="submit" class="btn btn-success">
+                    <i class="bi bi-check-lg"></i> Save
+                </button>
+                <a href="{% url 'core:rbac_group_list' %}" class="btn btn-outline-secondary">Cancel</a>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

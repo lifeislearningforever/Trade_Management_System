@@ -1,0 +1,739 @@
+{% extends 'base.html' %}
+{% load static core_filters %}
+
+{% block title %}Trade {{ trade.deal_number }} - CisTrade{% endblock %}
+
+{% block breadcrumb %}
+    <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
+    <li class="breadcrumb-item"><a href="{% url 'trade:list' %}">Trades</a></li>
+    <li class="breadcrumb-item active">{{ trade.deal_number }}</li>
+{% endblock %}
+
+{% block content %}
+<div class="trade-detail-container">
+    <!-- Page Header -->
+    <div class="content-header d-flex justify-content-between align-items-center">
+        <div>
+            <h1 class="content-title">
+                <i class="bi bi-graph-up text-primary"></i> Trade Details
+            </h1>
+            <p class="content-subtitle">{{ trade.deal_number }} - {{ trade.trade_type }}</p>
+        </div>
+        <div>
+            {% if trade.status == 'INITIAL' %}
+                <span class="badge badge-secondary fs-6">Initial</span>
+            {% elif trade.status == 'MODIFIED' %}
+                <span class="badge badge-info fs-6">Modified</span>
+            {% elif trade.status == 'VALIDATED' %}
+                <span class="badge badge-primary fs-6">Validated</span>
+            {% elif trade.status == 'SETTLED' %}
+                <span class="badge badge-success fs-6">Settled</span>
+            {% elif trade.status == 'CANCELLED' %}
+                <span class="badge badge-dark fs-6">Cancelled</span>
+            {% elif trade.status == 'PENDING_CANCELLATION' %}
+                <span class="badge badge-danger fs-6">Pending Cancellation</span>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Action Buttons -->
+    {% can_act trade "trade" as ta %}
+    <div class="mb-4 d-flex gap-2 flex-wrap">
+        <a href="{% url 'trade:list' %}" class="btn btn-outline-secondary">
+            <i class="bi bi-arrow-left"></i> Back to List
+        </a>
+
+        {% if ta.can_edit %}
+        <a href="{% url 'trade:edit' trade.trade_id %}" class="btn btn-warning">
+            <i class="bi bi-pencil"></i> Edit
+        </a>
+        {% endif %}
+
+        {% if ta.can_validate %}
+        <button type="button" class="btn btn-success" data-bs-toggle="modal" data-bs-target="#validateModal">
+            <i class="bi bi-check-circle"></i> Validate
+        </button>
+        {% endif %}
+
+        {% if ta.can_settle %}
+        <button type="button" class="btn btn-success" data-bs-toggle="modal" data-bs-target="#settleModal">
+            <i class="bi bi-check2-all"></i> Settle
+        </button>
+        {% endif %}
+
+        {% if ta.can_cancel %}
+        <button type="button" class="btn btn-outline-danger" data-bs-toggle="modal" data-bs-target="#cancelModal">
+            <i class="bi bi-x-circle"></i> Cancel
+        </button>
+        {% endif %}
+
+        {% if ta.can_restore %}
+        <form method="post" action="{% url 'trade:reactivate' trade.trade_id %}" class="d-inline">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-outline-success" onclick="return confirm('Restore this trade to Initial?')">
+                <i class="bi bi-arrow-counterclockwise"></i> Restore
+            </button>
+        </form>
+        {% endif %}
+
+        {% if ta.can_approve_cancellation %}
+        <button type="button" class="btn btn-success" data-bs-toggle="modal" data-bs-target="#approveCancellationModal">
+            <i class="bi bi-check-circle"></i> Approve Cancellation
+        </button>
+        <button type="button" class="btn btn-danger" data-bs-toggle="modal" data-bs-target="#rejectCancellationModal">
+            <i class="bi bi-x-circle"></i> Reject Cancellation
+        </button>
+        {% endif %}
+
+        <a href="{% url 'trade:history' trade.trade_id %}" class="btn btn-outline-info">
+            <i class="bi bi-clock-history"></i> View History
+        </a>
+    </div>
+
+    <div class="row">
+        <!-- Trade Details Column -->
+        <div class="col-lg-8">
+            <!-- Trade Information Card -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">
+                        <i class="bi bi-info-circle"></i> Trade Information
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label text-muted">Deal Number</label>
+                            <div class="fw-bold">{{ trade.deal_number|default:"-" }}</div>
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label text-muted">Trade Type</label>
+                            <div>
+                                {% if trade.trade_type == 'BUY' %}
+                                    <span class="badge bg-success fs-6">Buy</span>
+                                {% elif trade.trade_type == 'SELL' %}
+                                    <span class="badge bg-danger fs-6">Sell</span>
+                                {% else %}
+                                    <span class="badge bg-secondary fs-6">{{ trade.trade_type }}</span>
+                                {% endif %}
+                            </div>
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label text-muted">Trade Status</label>
+                            <div>
+                                {% if trade.trade_status %}
+                                    <span class="badge bg-secondary fs-6">{{ trade.trade_status }}</span>
+                                {% else %}
+                                    <span class="text-muted">-</span>
+                                {% endif %}
+                            </div>
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label text-muted">Source System</label>
+                            <div>
+                                {% if trade.src_system|upper == 'CIS' %}
+                                    <span class="badge badge-success fs-6">CIS</span>
+                                {% else %}
+                                    <span class="badge badge-secondary fs-6">{{ trade.src_system|upper|default:"GMP" }}</span>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                    <hr>
+                    <div class="row">
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label text-muted">Portfolio</label>
+                            <div class="fw-bold">{{ trade.portfolio_short_name|default:"-" }}</div>
+                            {% if trade.portfolio_full_name %}
+                            <small class="text-muted">{{ trade.portfolio_full_name }}</small>
+                            {% endif %}
+                        </div>
+                        <div class="col-md-2 mb-3">
+                            <label class="form-label text-muted">Local CCY</label>
+                            <div class="fw-bold">
+                                {% if trade.portfolio_currency %}
+                                    <span class="badge bg-success">{{ trade.portfolio_currency }}</span>
+                                {% elif trade.currency_code %}
+                                    <span class="badge bg-success">{{ trade.currency_code }}</span>
+                                {% else %}
+                                    -
+                                {% endif %}
+                            </div>
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label text-muted">Security</label>
+                            <div class="fw-bold">{{ trade.security_label|default:"-" }}</div>
+                            {% if trade.security_full_name %}
+                            <small class="text-muted">{{ trade.security_full_name }}</small>
+                            {% endif %}
+                        </div>
+                        <div class="col-md-2 mb-3">
+                            <label class="form-label text-muted">Foreign CCY</label>
+                            <div class="fw-bold">
+                                {% if trade.currency_code %}
+                                    <span class="badge bg-primary">{{ trade.currency_code }}</span>
+                                {% elif trade.security_currency %}
+                                    <span class="badge bg-primary">{{ trade.security_currency }}</span>
+                                {% else %}
+                                    -
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label text-muted">Trade Date</label>
+                            <div>{{ trade.trade_date|default:"-" }}</div>
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label text-muted">Settle Date</label>
+                            <div>{{ trade.settle_date|default:"-" }}</div>
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label text-muted">Counterparty</label>
+                            <div>{{ trade.counterparty|default:"-" }}</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Quantity & Price Card -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">
+                        <i class="bi bi-calculator"></i> Quantity & Price
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-3 mb-3">
+                            <label class="form-label text-muted">Quantity</label>
+                            <div class="fw-bold fs-5">{{ trade.quantity|floatformat:2|default:"0.00" }}</div>
+                        </div>
+                        <div class="col-md-3 mb-3">
+                            <label class="form-label text-muted">Face Value</label>
+                            <div class="fw-bold fs-5">{{ trade.face_value|floatformat:2|default:"0.00" }}</div>
+                        </div>
+                        <div class="col-md-3 mb-3">
+                            <label class="form-label text-muted">Lot</label>
+                            <div class="fw-bold fs-5">{{ trade.lot|floatformat:0|default:"0" }}</div>
+                        </div>
+                        <div class="col-md-3 mb-3">
+                            <label class="form-label text-muted">Price</label>
+                            <div class="fw-bold fs-5">{{ trade.price|floatformat:8|default:"0.00000000" }}</div>
+                        </div>
+                    </div>
+                    <hr>
+                    <div class="row">
+                        <div class="col-md-3 mb-3">
+                            <label class="form-label text-muted">Commission</label>
+                            <div>{{ trade.commission|floatformat:2|default:"0.00" }}</div>
+                        </div>
+                        <div class="col-md-3 mb-3">
+                            <label class="form-label text-muted">SEC Fee</label>
+                            <div>{{ trade.sec_fee|floatformat:2|default:"0.00" }}</div>
+                        </div>
+                        <div class="col-md-3 mb-3">
+                            <label class="form-label text-muted">Other Charges</label>
+                            <div>{{ trade.other_charges|floatformat:2|default:"0.00" }}</div>
+                        </div>
+                    </div>
+                    <hr>
+                    <div class="row">
+                        <div class="col-md-3 mb-3">
+                            <label class="form-label text-muted">Total Amount FC <small class="text-muted">(incl. charges)</small></label>
+                            <div class="fw-bold fs-5 text-primary">
+                                {{ trade.total_amount_fc|floatformat:2|default:"0.00" }}
+                                {% if trade.currency_code %}
+                                    <span class="badge bg-primary">{{ trade.currency_code }}</span>
+                                {% endif %}
+                            </div>
+                        </div>
+                        <div class="col-md-3 mb-3">
+                            <label class="form-label text-muted">Total Amount LC <small class="text-muted">(incl. charges)</small></label>
+                            <div class="fw-bold fs-5 text-success">
+                                {{ trade.total_amount_lc|floatformat:2|default:"0.00" }}
+                                {% if trade.portfolio_currency %}
+                                    <span class="badge bg-success">{{ trade.portfolio_currency }}</span>
+                                {% elif trade.currency_code %}
+                                    <span class="badge bg-success">{{ trade.currency_code }}</span>
+                                {% endif %}
+                            </div>
+                        </div>
+                        <div class="col-md-3 mb-3">
+                            <label class="form-label text-muted">Gross Amount FC <small class="text-muted">(excl. charges)</small></label>
+                            <div class="fw-bold fs-5 text-info">
+                                {{ trade.gross_amount_fc|floatformat:2|default:"0.00" }}
+                                {% if trade.currency_code %}
+                                    <span class="badge bg-info">{{ trade.currency_code }}</span>
+                                {% endif %}
+                            </div>
+                        </div>
+                        <div class="col-md-3 mb-3">
+                            <label class="form-label text-muted">Gross Amount LC <small class="text-muted">(excl. charges)</small></label>
+                            <div class="fw-bold fs-5 text-secondary">
+                                {{ trade.gross_amount_lc|floatformat:2|default:"0.00" }}
+                                {% if trade.portfolio_currency %}
+                                    <span class="badge bg-secondary">{{ trade.portfolio_currency }}</span>
+                                {% elif trade.currency_code %}
+                                    <span class="badge bg-secondary">{{ trade.currency_code }}</span>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Broker Charges Card -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">
+                        <i class="bi bi-receipt"></i> Broker Charges
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label text-muted">Broker</label>
+                            <div class="fw-bold">{{ trade.brokers|default:"-" }}</div>
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label text-muted">Exchange</label>
+                            <div>{{ trade.charge_exchange|default:"-" }}</div>
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label text-muted">Country</label>
+                            <div>{{ trade.charge_country|default:"-" }}</div>
+                        </div>
+                    </div>
+                    <hr>
+                    <div class="row">
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label text-muted">Brokerage Fee</label>
+                            <div class="fw-bold">{{ trade.calculated_commission|floatformat:2|default:"0.00" }}</div>
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label text-muted">Clearing Fee</label>
+                            <div>{{ trade.calculated_clearing_fee|floatformat:2|default:"0.00" }}</div>
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label text-muted">Trading Fee</label>
+                            <div>{{ trade.calculated_trading_fee|floatformat:2|default:"0.00" }}</div>
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label text-muted">GST</label>
+                            <div>{{ trade.calculated_gst|floatformat:2|default:"0.00" }}</div>
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label text-muted">FFP/SGX SI FEE</label>
+                            <div>{{ trade.calculated_other_fees|floatformat:2|default:"0.00" }}</div>
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label text-muted">Total Charges</label>
+                            <div class="fw-bold fs-5 text-primary">{{ trade.total_calculated_charges|floatformat:2|default:"0.00" }}</div>
+                        </div>
+                    </div>
+                    {% if trade.charges_auto_calculated %}
+                    <div class="alert alert-success py-2 mb-0">
+                        <i class="bi bi-check-circle"></i> Charges auto-calculated from broker lookup
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- GL & Broker Card -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">
+                        <i class="bi bi-bank"></i> GL & Broker Details
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label text-muted">Custodian</label>
+                            <div>{{ trade.custodian|default:"-" }}</div>
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label text-muted">GL Fund Type</label>
+                            <div>{{ trade.gl_fund_type|default:"-" }}</div>
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label text-muted">GL Cost Centre</label>
+                            <div>{{ trade.gl_cost_centre|default:"-" }}</div>
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label text-muted">GL Account Code</label>
+                            <div>{{ trade.gl_account_code|default:"-" }}</div>
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label text-muted">Selling Rule</label>
+                            <div>{{ trade.selling_rule|default:"-" }}</div>
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <!-- Empty for alignment -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Remarks -->
+            {% if trade.remarks %}
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">
+                        <i class="bi bi-chat-text"></i> Remarks
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <p class="mb-0">{{ trade.remarks }}</p>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- Workflow & UDF Column -->
+        <div class="col-lg-4">
+            <!-- Workflow Status Card -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">
+                        <i class="bi bi-diagram-3"></i> Workflow Status
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label class="form-label text-muted">Created By</label>
+                        <div>{{ trade.created_by|default:"-" }}</div>
+                        <small class="text-muted">{{ trade.created_at|default:"-" }}</small>
+                    </div>
+
+                    {% if trade.validated_by %}
+                    <div class="mb-3">
+                        <label class="form-label text-muted">Validated By</label>
+                        <div>{{ trade.validated_by }}</div>
+                        <small class="text-muted">{{ trade.validated_at|default:"-" }}</small>
+                        {% if trade.validation_comments %}
+                        <div class="mt-1"><em>"{{ trade.validation_comments }}"</em></div>
+                        {% endif %}
+                    </div>
+                    {% endif %}
+
+                    {% if trade.settled_by %}
+                    <div class="mb-3">
+                        <label class="form-label text-muted">Settled By</label>
+                        <div>{{ trade.settled_by }}</div>
+                        <small class="text-muted">{{ trade.settled_at|default:"-" }}</small>
+                        {% if trade.settlement_comments %}
+                        <div class="mt-1"><em>"{{ trade.settlement_comments }}"</em></div>
+                        {% endif %}
+                    </div>
+                    {% endif %}
+
+                    {% if trade.cancelled_by %}
+                    <div class="mb-3">
+                        <label class="form-label text-muted">Cancelled By</label>
+                        <div class="text-danger">{{ trade.cancelled_by }}</div>
+                        <small class="text-muted">{{ trade.cancelled_at|default:"-" }}</small>
+                        {% if trade.cancel_reason %}
+                        <div class="mt-1 text-danger"><em>"{{ trade.cancel_reason }}"</em></div>
+                        {% endif %}
+                    </div>
+                    {% endif %}
+
+                    {% if trade.updated_by and trade.updated_by != trade.created_by %}
+                    <div class="mb-3">
+                        <label class="form-label text-muted">Last Updated By</label>
+                        <div>{{ trade.updated_by }}</div>
+                        <small class="text-muted">{{ trade.updated_at|default:"-" }}</small>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- UDF Fields Card -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">
+                        <i class="bi bi-sliders"></i> User Defined Fields
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-6 mb-2">
+                            <label class="form-label text-muted small">Fund Type</label>
+                            <div>{{ trade.udf_fund_type|default:"-" }}</div>
+                        </div>
+                        <div class="col-6 mb-2">
+                            <label class="form-label text-muted small">Section 31/26</label>
+                            <div>{{ trade.udf_section_31_26|default:"-" }}</div>
+                        </div>
+                        <div class="col-6 mb-2">
+                            <label class="form-label text-muted small">Sub Custodian</label>
+                            <div>{{ trade.udf_sub_custodian|default:"-" }}</div>
+                        </div>
+                        <div class="col-6 mb-2">
+                            <label class="form-label text-muted small">UOBN/UOBN-HK</label>
+                            <div>{{ trade.udf_uobn_uobn_hk|default:"-" }}</div>
+                        </div>
+                        <div class="col-6 mb-2">
+                            <label class="form-label text-muted small">Income/Exp Type</label>
+                            <div>{{ trade.udf_income_exp_type|default:"-" }}</div>
+                        </div>
+                        <div class="col-6 mb-2">
+                            <label class="form-label text-muted small">Revision Code</label>
+                            <div>{{ trade.udf_revision_code|default:"-" }}</div>
+                        </div>
+                    </div>
+                    <hr>
+                    <div class="d-flex flex-wrap gap-3">
+                        <div>
+                            {% if trade.udf_disclosure_req %}
+                                <i class="bi bi-check-circle-fill text-success"></i>
+                            {% else %}
+                                <i class="bi bi-x-circle text-muted"></i>
+                            {% endif %}
+                            Disclosure Required
+                        </div>
+                        <div>
+                            {% if trade.udf_counter_pledged %}
+                                <i class="bi bi-check-circle-fill text-success"></i>
+                            {% else %}
+                                <i class="bi bi-x-circle text-muted"></i>
+                            {% endif %}
+                            Counter Pledged
+                        </div>
+                        <div>
+                            {% if trade.udf_currency_hedge %}
+                                <i class="bi bi-check-circle-fill text-success"></i>
+                            {% else %}
+                                <i class="bi bi-x-circle text-muted"></i>
+                            {% endif %}
+                            Currency Hedge
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Validate Modal -->
+<div class="modal fade" id="validateModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="post" action="{% url 'trade:validate' trade.trade_id %}">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="approve">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="bi bi-check-circle text-success"></i> Validate Trade</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p>Are you sure you want to validate this trade?</p>
+                    <div class="mb-3">
+                        <label class="form-label">Comments (optional)</label>
+                        <textarea class="form-control" name="comments" rows="3" placeholder="Enter validation comments..."></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-success">Validate</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Reject Modal -->
+<div class="modal fade" id="rejectModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="post" action="{% url 'trade:validate' trade.trade_id %}">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="reject">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="bi bi-x-circle text-danger"></i> Reject Trade</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p>Are you sure you want to reject this trade?</p>
+                    <div class="mb-3">
+                        <label class="form-label">Rejection Reason <span class="text-danger">*</span></label>
+                        <textarea class="form-control" name="comments" rows="3" placeholder="Enter rejection reason..." required></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-danger">Reject</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Settle Modal -->
+<div class="modal fade" id="settleModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="post" action="{% url 'trade:settle' trade.trade_id %}">
+                {% csrf_token %}
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="bi bi-check2-all text-success"></i> Settle Trade</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p>Are you sure you want to settle this trade? This action will make the trade active.</p>
+                    <div class="mb-3">
+                        <label class="form-label">Settlement Comments (optional)</label>
+                        <textarea class="form-control" name="comments" rows="3" placeholder="Enter settlement comments..."></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-success">Settle</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Position Impact (shown for settled trades) -->
+{% if position %}
+<div class="card mb-4">
+    <div class="card-header">
+        <h5 class="card-title mb-0">
+            <i class="bi bi-pie-chart"></i> Current Position Impact
+        </h5>
+    </div>
+    <div class="card-body">
+        <div class="row">
+            <div class="col-md-2">
+                <label class="form-label text-muted small">Quantity</label>
+                <div class="fw-bold">{{ position.quantity|floatformat:2 }}</div>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label text-muted small">Avg Cost</label>
+                <div class="fw-bold">{{ position.average_cost|floatformat:8 }}</div>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label text-muted small">Total Cost</label>
+                <div class="fw-bold">{{ position.total_cost|floatformat:2 }}</div>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label text-muted small">Market Value</label>
+                <div class="fw-bold">{{ position.market_value|floatformat:2 }}</div>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label text-muted small">Unrealized P&L</label>
+                <div class="fw-bold {% if position.unrealized_pnl >= 0 %}text-success{% else %}text-danger{% endif %}">
+                    {{ position.unrealized_pnl|floatformat:2 }}
+                </div>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label text-muted small">Realized P&L</label>
+                <div class="fw-bold {% if position.realized_pnl >= 0 %}text-success{% else %}text-danger{% endif %}">
+                    {{ position.realized_pnl|floatformat:2 }}
+                </div>
+            </div>
+        </div>
+        <div class="mt-2">
+            <a href="{% url 'trade:position_detail' position.position_id %}" class="btn btn-sm btn-outline-primary">
+                <i class="bi bi-eye"></i> View Full Position
+            </a>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<!-- Cancel Modal -->
+<div class="modal fade" id="cancelModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="post" action="{% url 'trade:cancel' trade.trade_id %}">
+                {% csrf_token %}
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="bi bi-trash text-danger"></i> Cancel Trade</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    {% if trade.status == 'SETTLED' or trade.status == 'VALIDATED' %}
+                    <p class="text-warning"><i class="bi bi-exclamation-triangle-fill"></i> This trade has a settled position. Cancellation will be submitted for checker approval before the position is reversed.</p>
+                    {% else %}
+                    <p class="text-danger">Are you sure you want to cancel this trade?</p>
+                    {% endif %}
+                    <div class="mb-3">
+                        <label class="form-label">Cancellation Reason <span class="text-danger">*</span></label>
+                        <textarea class="form-control" name="reason" rows="3" placeholder="Enter cancellation reason..." required></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                    <button type="submit" class="btn btn-danger">Cancel Trade</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- PORTIARP-7610: Approve Cancellation Modal -->
+<div class="modal fade" id="approveCancellationModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="post" action="{% url 'trade:approve_cancellation' trade.trade_id %}">
+                {% csrf_token %}
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="bi bi-check-circle text-success"></i> Approve Cancellation</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p>Approving will permanently cancel this trade and reverse its AVP position.</p>
+                    {% if trade.cancel_reason %}
+                    <div class="alert alert-warning py-2">
+                        <strong>Cancellation reason:</strong> {{ trade.cancel_reason }}
+                    </div>
+                    {% endif %}
+                    <div class="mb-3">
+                        <label class="form-label">Comments (optional)</label>
+                        <textarea class="form-control" name="comments" rows="2" placeholder="Approval comments..."></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                    <button type="submit" class="btn btn-success">Approve Cancellation</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- PORTIARP-7610: Reject Cancellation Modal -->
+<div class="modal fade" id="rejectCancellationModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="post" action="{% url 'trade:reject_cancellation' trade.trade_id %}">
+                {% csrf_token %}
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="bi bi-x-circle text-danger"></i> Reject Cancellation</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p>Rejecting will revert the trade to its previous status. The position will be unchanged.</p>
+                    <div class="mb-3">
+                        <label class="form-label">Comments (optional)</label>
+                        <textarea class="form-control" name="comments" rows="2" placeholder="Rejection comments..."></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                    <button type="submit" class="btn btn-danger">Reject Cancellation</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}

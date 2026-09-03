@@ -1,0 +1,532 @@
+{% extends 'base.html' %}
+{% load static core_filters %}
+
+{% block title %}Counterparties - CisTrade{% endblock %}
+
+{% block breadcrumb %}
+    <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
+    <li class="breadcrumb-item"><a href="#">Reference Data</a></li>
+    <li class="breadcrumb-item active">Counterparties</li>
+{% endblock %}
+
+{% block content %}
+<div class="counterparty-list-container" style="max-width: 100%; overflow-x: hidden;">
+    <!-- Page Header -->
+    <div class="content-header d-flex justify-content-between align-items-start">
+        <div>
+            <h1 class="content-title">
+                <i class="bi bi-building text-primary"></i> Counterparties
+            </h1>
+            <p class="content-subtitle">Manage counterparty reference data from Kudu table: cis_counterparty_kudu</p>
+        </div>
+        <div class="d-flex gap-2">
+            <a href="{% url 'reference_data:counterparty_create' %}" class="btn btn-primary">
+                <i class="bi bi-plus-circle"></i> Create Counterparty
+            </a>
+            <a href="{% url 'dashboard' %}" class="btn btn-outline-secondary">
+                <i class="bi bi-arrow-left"></i> Back
+            </a>
+        </div>
+    </div>
+
+    <!-- Search & Filter Card -->
+    <div class="card mb-4">
+        <div class="card-header">
+            <h5 class="card-title mb-0">
+                <i class="bi bi-funnel"></i> Search & Filter
+            </h5>
+        </div>
+        <div class="card-body">
+            <form method="get" action="{% url 'reference_data:counterparty_list' %}" class="row g-3">
+                <!-- Search -->
+                <div class="col-md-6">
+                    <label class="form-label">Search</label>
+                    <div class="input-group">
+                        <span class="input-group-text"><i class="bi bi-search"></i></span>
+                        <input type="text" class="form-control" name="search" value="{{ search }}"
+                               placeholder="Search by short name or full name...">
+                    </div>
+                </div>
+
+                <!-- Country Filter -->
+                <div class="col-md-3">
+                    <label class="form-label">Country</label>
+                    <select class="form-select" name="country">
+                        <option value="">All Countries</option>
+                        {% for country in countries %}
+                            <option value="{{ country }}" {% if selected_country == country %}selected{% endif %}>
+                                {{ country }}
+                            </option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <!-- Status Filter -->
+                <div class="col-md-2">
+                    <label class="form-label">Status</label>
+                    <select class="form-select" name="status">
+                        <option value="active" {% if selected_status == 'active' %}selected{% endif %}>Active</option>
+                        <option value="inactive" {% if selected_status == 'inactive' %}selected{% endif %}>Inactive</option>
+                        <option value="all" {% if selected_status == 'all' %}selected{% endif %}>All</option>
+                    </select>
+                </div>
+
+                <!-- CIF Filter -->
+                <div class="col-md-2">
+                    <label class="form-label">CIF Count</label>
+                    <select class="form-select" name="cif_filter">
+                        <option value="" {% if not cif_filter %}selected{% endif %}>All</option>
+                        <option value="multiple" {% if cif_filter == 'multiple' %}selected{% endif %}>Multiple CIFs Only</option>
+                    </select>
+                </div>
+
+                <!-- Action Buttons -->
+                <div class="col-md-1 d-flex align-items-end gap-2">
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-search"></i>
+                    </button>
+                    <a href="{% url 'reference_data:counterparty_list' %}" class="btn btn-outline-secondary">
+                        <i class="bi bi-x-circle"></i>
+                    </a>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Counterparties Table -->
+    <div class="card">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <h5 class="card-title mb-0">
+                Counterparty List
+                <span class="badge badge-primary ms-2">{{ total_count }} counterparties</span>
+            </h5>
+            <a href="?export=csv{% if search %}&search={{ search }}{% endif %}{% if selected_country %}&country={{ selected_country }}{% endif %}{% if selected_status %}&status={{ selected_status }}{% endif %}" class="btn btn-sm btn-success">
+                <i class="bi bi-download"></i> Export CSV
+            </a>
+        </div>
+        <div class="card-body p-0">
+            {% if counterparties %}
+                <div class="table-responsive" style="display: block; width: 100%; max-height: 600px; overflow-x: auto; overflow-y: auto;">
+                    <table class="table table-hover table-sm mb-0" style="font-size: 0.875rem; white-space: nowrap; width: max-content;">
+                        <thead class="table-light" style="position: sticky; top: 0; z-index: 10; background-color: #f8f9fa;">
+                            <tr>
+                                <th style="width: 150px; position: sticky; left: 0; background-color: #f8f9fa; z-index: 11; border-right: 2px solid #dee2e6;">Short Name</th>
+                                <th style="width: 80px;">Source</th>
+                                <th style="width: 70px;">CIFs</th>
+                                <th style="width: 200px;">Full Name</th>
+                                <th style="width: 120px;">City</th>
+                                <th style="width: 120px;">Country</th>
+                                <th style="width: 100px;">Postal Code</th>
+                                <th style="width: 120px;">Primary Contact</th>
+                                <th style="width: 120px;">Primary Number</th>
+                                <th style="width: 100px;">Industry</th>
+                                <th style="width: 80px;">Bank</th>
+                                <th style="width: 80px;">Broker</th>
+                                <th style="width: 80px;">Custodian</th>
+                                <th style="width: 80px;">Issuer</th>
+                                <th style="width: 80px;">Status</th>
+                                <th style="width: 220px; position: sticky; right: 0; background-color: #f8f9fa; z-index: 11; border-left: 2px solid #dee2e6;">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for cp in counterparties %}
+                            <tr>
+                                <td style="position: sticky; left: 0; background-color: white; z-index: 9; border-right: 2px solid #dee2e6;">
+                                    <strong class="text-primary">{{ cp.counterparty_short_name|default:"-" }}</strong>
+                                </td>
+                                <td>
+                                    {% if cp.src_system|upper == 'CIS' %}
+                                        <span class="badge badge-success">CIS</span>
+                                    {% else %}
+                                        <span class="badge badge-secondary">{{ cp.src_system|upper|default:"GMP" }}</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    <button type="button" class="btn btn-sm btn-outline-info"
+                                            onclick="viewCIFs('{{ cp.counterparty_short_name }}')"
+                                            title="View CIFs">
+                                        <i class="bi bi-file-earmark-text"></i>
+                                    </button>
+                                </td>
+                                <td>{{ cp.counterparty_full_name|default:"-" }}</td>
+                                <td>{{ cp.city|default:"-" }}</td>
+                                <td>{{ cp.country|default:"-" }}</td>
+                                <td>{{ cp.postal_code|default:"-" }}</td>
+                                <td>{{ cp.primary_contact|default:"-" }}</td>
+                                <td>{{ cp.primary_number|default:"-" }}</td>
+                                <td>{{ cp.industry|default:"-" }}</td>
+                                <td>
+                                    {% if cp.is_bank %}
+                                        <span class="badge badge-success">Yes</span>
+                                    {% else %}
+                                        <span class="badge badge-secondary">No</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if cp.is_broker %}
+                                        <span class="badge badge-success">Yes</span>
+                                    {% else %}
+                                        <span class="badge badge-secondary">No</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if cp.is_custodian %}
+                                        <span class="badge badge-success">Yes</span>
+                                    {% else %}
+                                        <span class="badge badge-secondary">No</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if cp.is_issuer %}
+                                        <span class="badge badge-success">Yes</span>
+                                    {% else %}
+                                        <span class="badge badge-secondary">No</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if cp.is_active %}
+                                        <span class="badge badge-success">Active</span>
+                                    {% else %}
+                                        <span class="badge badge-warning">Inactive</span>
+                                    {% endif %}
+                                </td>
+                                <td style="position: sticky; right: 0; background-color: white; z-index: 9; border-left: 2px solid #dee2e6;">
+                                    <div class="btn-group" role="group">
+                                        {# View button - available for all records #}
+                                        <a href="{% url 'reference_data:counterparty_detail' cp.counterparty_short_name %}"
+                                           class="btn btn-sm btn-outline-info" title="View Details">
+                                            <i class="bi bi-eye"></i>
+                                        </a>
+                                        {% can_act cp "party" as cpa %}
+                                        {% if cpa.can_edit %}
+                                            <a href="{% url 'reference_data:counterparty_edit' cp.counterparty_short_name %}?next={{ request.get_full_path|urlencode }}"
+                                               class="btn btn-sm btn-outline-primary" title="Edit">
+                                                <i class="bi bi-pencil"></i>
+                                            </a>
+                                        {% else %}
+                                            <button class="btn btn-sm btn-outline-secondary" disabled title="Read-only: {{ cp.src_system|upper }} record">
+                                                <i class="bi bi-pencil"></i>
+                                            </button>
+                                        {% endif %}
+
+                                        {% if cpa.can_delete %}
+                                            {% if cp.is_deleted %}
+                                                <form method="post" action="{% url 'reference_data:counterparty_restore' cp.counterparty_short_name %}"
+                                                      style="display: inline;" onsubmit="return confirm('Restore this counterparty?');">
+                                                    {% csrf_token %}
+                                                    <button type="submit" class="btn btn-sm btn-outline-success" title="Restore">
+                                                        <i class="bi bi-arrow-counterclockwise"></i>
+                                                    </button>
+                                                </form>
+                                            {% else %}
+                                                <form method="post" action="{% url 'reference_data:counterparty_delete' cp.counterparty_short_name %}"
+                                                      style="display: inline;" onsubmit="return confirm('Delete this counterparty?');">
+                                                    {% csrf_token %}
+                                                    <button type="submit" class="btn btn-sm btn-outline-danger" title="Delete">
+                                                        <i class="bi bi-trash"></i>
+                                                    </button>
+                                                </form>
+                                            {% endif %}
+                                        {% else %}
+                                            <button class="btn btn-sm btn-outline-secondary" disabled title="Read-only: {{ cp.src_system|upper }} record">
+                                                <i class="bi bi-trash"></i>
+                                            </button>
+                                        {% endif %}
+                                    </div>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Pagination -->
+                {% if counterparties.has_other_pages %}
+                <div class="card-footer">
+                    <nav aria-label="Counterparty pagination">
+                        <ul class="pagination justify-content-center mb-0">
+                            {% if counterparties.has_previous %}
+                                <li class="page-item">
+                                    <a class="page-link" href="?page=1{% if search %}&search={{ search }}{% endif %}{% if selected_country %}&country={{ selected_country }}{% endif %}{% if selected_status %}&status={{ selected_status }}{% endif %}{% if cif_filter %}&cif_filter={{ cif_filter }}{% endif %}" aria-label="First">
+                                        <span aria-hidden="true">&laquo;&laquo;</span>
+                                    </a>
+                                </li>
+                                <li class="page-item">
+                                    <a class="page-link" href="?page={{ counterparties.previous_page_number }}{% if search %}&search={{ search }}{% endif %}{% if selected_country %}&country={{ selected_country }}{% endif %}{% if selected_status %}&status={{ selected_status }}{% endif %}{% if cif_filter %}&cif_filter={{ cif_filter }}{% endif %}" aria-label="Previous">
+                                        <span aria-hidden="true">&laquo;</span>
+                                    </a>
+                                </li>
+                            {% else %}
+                                <li class="page-item disabled">
+                                    <span class="page-link">&laquo;&laquo;</span>
+                                </li>
+                                <li class="page-item disabled">
+                                    <span class="page-link">&laquo;</span>
+                                </li>
+                            {% endif %}
+
+                            {% for num in counterparties.paginator.page_range %}
+                                {% if counterparties.number == num %}
+                                    <li class="page-item active">
+                                        <span class="page-link">{{ num }}</span>
+                                    </li>
+                                {% elif num > counterparties.number|add:'-3' and num < counterparties.number|add:'3' %}
+                                    <li class="page-item">
+                                        <a class="page-link" href="?page={{ num }}{% if search %}&search={{ search }}{% endif %}{% if selected_country %}&country={{ selected_country }}{% endif %}{% if selected_status %}&status={{ selected_status }}{% endif %}{% if cif_filter %}&cif_filter={{ cif_filter }}{% endif %}">{{ num }}</a>
+                                    </li>
+                                {% endif %}
+                            {% endfor %}
+
+                            {% if counterparties.has_next %}
+                                <li class="page-item">
+                                    <a class="page-link" href="?page={{ counterparties.next_page_number }}{% if search %}&search={{ search }}{% endif %}{% if selected_country %}&country={{ selected_country }}{% endif %}{% if selected_status %}&status={{ selected_status }}{% endif %}{% if cif_filter %}&cif_filter={{ cif_filter }}{% endif %}" aria-label="Next">
+                                        <span aria-hidden="true">&raquo;</span>
+                                    </a>
+                                </li>
+                                <li class="page-item">
+                                    <a class="page-link" href="?page={{ counterparties.paginator.num_pages }}{% if search %}&search={{ search }}{% endif %}{% if selected_country %}&country={{ selected_country }}{% endif %}{% if selected_status %}&status={{ selected_status }}{% endif %}{% if cif_filter %}&cif_filter={{ cif_filter }}{% endif %}" aria-label="Last">
+                                        <span aria-hidden="true">&raquo;&raquo;</span>
+                                    </a>
+                                </li>
+                            {% else %}
+                                <li class="page-item disabled">
+                                    <span class="page-link">&raquo;</span>
+                                </li>
+                                <li class="page-item disabled">
+                                    <span class="page-link">&raquo;&raquo;</span>
+                                </li>
+                            {% endif %}
+                        </ul>
+                        <div class="text-center mt-2" style="font-size: var(--font-size-sm); color: var(--gray-600);">
+                            Page {{ counterparties.number }} of {{ counterparties.paginator.num_pages }} ({{ total_count }} total counterparties)
+                        </div>
+                    </nav>
+                </div>
+                {% endif %}
+            {% else %}
+                <div class="text-center py-5" style="color: var(--gray-500);">
+                    <i class="bi bi-building" style="font-size: 3rem; opacity: 0.3;"></i>
+                    <p class="mt-3 mb-0">No counterparties found</p>
+                    {% if search or selected_country or selected_status != 'active' %}
+                        <p class="text-muted">Try adjusting your filters</p>
+                        <a href="{% url 'reference_data:counterparty_list' %}" class="btn btn-sm btn-primary mt-2">Clear Filters</a>
+                    {% else %}
+                        <a href="{% url 'reference_data:counterparty_create' %}" class="btn btn-sm btn-primary mt-2">
+                            <i class="bi bi-plus-circle"></i> Create First Counterparty
+                        </a>
+                    {% endif %}
+                </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Info Alert -->
+    <div class="alert alert-info mt-4">
+        <i class="bi bi-info-circle"></i>
+        <strong>Note:</strong> Counterparty data is now stored in Kudu table <code>cis_counterparty_kudu</code> with a stable primary key (<code>counterparty_short_name</code>).
+        This allows full CRUD operations and ensures Django references never break when ETL runs.
+    </div>
+
+    <!-- CIF Details Modal -->
+    <div class="modal" id="cifModal" tabindex="-1" aria-labelledby="cifModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="cifModalLabel">
+                        <i class="bi bi-file-earmark-text"></i> CIF Details
+                    </h5>
+                    <button type="button" class="btn-close" onclick="closeCIFModal()" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div id="cifLoadingSpinner" class="text-center py-4" style="display: none;">
+                        <div class="spinner-border text-primary" role="status">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                        <p class="mt-2 text-muted">Loading CIFs...</p>
+                    </div>
+
+                    <div id="cifContent" style="display: none;">
+                        <h6 class="mb-3">
+                            Counterparty: <strong id="cifCounterpartyName" class="text-primary"></strong>
+                        </h6>
+
+                        <div id="cifList"></div>
+
+                        <div id="noCIFsMessage" class="text-center py-4" style="display: none;">
+                            <i class="bi bi-inbox" style="font-size: 3rem; opacity: 0.3;"></i>
+                            <p class="mt-3 mb-0 text-muted">No CIFs found for this counterparty</p>
+                        </div>
+                    </div>
+
+                    <div id="cifErrorMessage" class="alert alert-danger" style="display: none;">
+                        <i class="bi bi-exclamation-triangle"></i>
+                        <span id="cifErrorText"></span>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" onclick="closeCIFModal()">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+(function () {
+    // ── CIF Modal controller ──────────────────────────────────────────────────
+    // Handles every corner-case:
+    //  1. Bootstrap moves #cifModal to <body> on show → querySelector on el, not document
+    //  2. Fast repeated clicks while modal is animating → queue next party, open after hidden
+    //  3. Stale fetch response arriving after user switched counterparty → AbortController
+    //  4. Any inner element temporarily null during transition → null-guarded helpers
+    // ─────────────────────────────────────────────────────────────────────────
+
+    const cifCache   = new Map();
+    let   _pending   = null;   // counterparty queued while modal is mid-animation
+    let   _current   = null;   // counterparty whose data is shown right now
+    let   _abortCtrl = null;   // AbortController for the in-flight fetch
+
+    // ── DOM helpers (always scoped to the modal element) ─────────────────────
+    function el()         { return document.getElementById('cifModal'); }
+    function q(id)        { const m = el(); return m ? m.querySelector('#'+id) : null; }
+    function show(id)     { const e = q(id); if (e) e.style.display = 'block'; }
+    function hide(id)     { const e = q(id); if (e) e.style.display = 'none';  }
+    function text(id, t)  { const e = q(id); if (e) e.textContent = t; }
+    function html(id, h)  { const e = q(id); if (e) e.innerHTML = h;   }
+
+    function resetContent(name) {
+        html('cifList', '');
+        text('cifCounterpartyName', name);
+        show('cifLoadingSpinner');
+        hide('cifContent');
+        hide('cifErrorMessage');
+        hide('noCIFsMessage');
+    }
+
+    function renderData(name, data) {
+        if (_current !== name) return; // user switched — discard
+        hide('cifLoadingSpinner');
+        show('cifContent');
+        if (data.success && data.cifs && data.cifs.length > 0) {
+            hide('noCIFsMessage');
+            html('cifList', buildCIFHtml(data.cifs));
+        } else {
+            html('cifList', '');
+            show('noCIFsMessage');
+        }
+    }
+
+    function renderError(name, message) {
+        if (_current !== name) return;
+        hide('cifLoadingSpinner');
+        show('cifErrorMessage');
+        text('cifErrorText', 'Error loading CIFs: ' + message);
+    }
+
+    // ── Fetch ─────────────────────────────────────────────────────────────────
+    function fetchCIFs(name) {
+        if (_abortCtrl) { _abortCtrl.abort(); }
+        _abortCtrl = new AbortController();
+
+        fetch(`/reference-data/counterparty/${encodeURIComponent(name)}/cif/`, {
+            method: 'GET',
+            headers: { 'X-Requested-With': 'XMLHttpRequest' },
+            credentials: 'same-origin',
+            signal: _abortCtrl.signal
+        })
+        .then(r => { if (!r.ok) throw new Error('Server error ' + r.status); return r.json(); })
+        .then(data => { cifCache.set(name, data); renderData(name, data); })
+        .catch(err => { if (err.name !== 'AbortError') renderError(name, err.message); });
+    }
+
+    // ── Open modal for a counterparty ─────────────────────────────────────────
+    function openFor(name) {
+        _current = name;
+        resetContent(name);
+        if (cifCache.has(name)) {
+            renderData(name, cifCache.get(name));
+        } else {
+            fetchCIFs(name);
+        }
+    }
+
+    // ── Bootstrap modal event wiring (done once on DOMContentLoaded) ─────────
+    document.addEventListener('DOMContentLoaded', function () {
+        const modalEl = el();
+        if (!modalEl) return;
+        modalEl.addEventListener('hidden.bs.modal', function () {
+            if (_pending !== null) {
+                const next = _pending;
+                _pending = null;
+                setTimeout(function () {
+                    bootstrap.Modal.getOrCreateInstance(modalEl).show();
+                    openFor(next);
+                }, 50);
+            }
+        });
+    });
+
+    // ── Public API ────────────────────────────────────────────────────────────
+    window.viewCIFs = function (name) {
+        const modalEl = el();
+        if (!modalEl) return;
+
+        const bsModal = bootstrap.Modal.getOrCreateInstance(modalEl);
+        const isOpen  = modalEl.classList.contains('show');
+        const isHiding = document.body.classList.contains('modal-open') && !isOpen;
+
+        if (isOpen || isHiding) {
+            _pending = name;
+            if (_abortCtrl) { _abortCtrl.abort(); _abortCtrl = null; }
+            bsModal.hide();
+        } else {
+            bsModal.show();
+            openFor(name);
+        }
+    };
+
+    window.closeCIFModal = function () {
+        const modalEl = el();
+        if (!modalEl) return;
+        _pending = null;
+        if (_abortCtrl) { _abortCtrl.abort(); _abortCtrl = null; }
+        const instance = bootstrap.Modal.getInstance(modalEl);
+        if (instance) instance.hide();
+    };
+
+    // ── HTML builder ──────────────────────────────────────────────────────────
+    function buildCIFHtml(cifs) {
+        return cifs.map(cif => `
+            <div class="card mb-3">
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <p class="mb-2"><strong>Country:</strong> ${cif.country || '-'}</p>
+                            <p class="mb-2"><strong>Source:</strong>
+                                ${(cif.src_system||'').toUpperCase()==='CIS'
+                                    ? '<span class="badge badge-success">CIS</span>'
+                                    : '<span class="badge badge-secondary">'+((cif.src_system||'GMP').toUpperCase())+'</span>'}
+                            </p>
+                        </div>
+                        <div class="col-md-6">
+                            <p class="mb-2"><strong>ISIN:</strong> ${cif.isin || '-'}</p>
+                            <p class="mb-2"><strong>Status:</strong>
+                                ${cif.is_active
+                                    ? '<span class="badge badge-success">Active</span>'
+                                    : '<span class="badge badge-warning">Inactive</span>'}
+                            </p>
+                        </div>
+                    </div>
+                    ${cif.description ? `<div class="row mt-2"><div class="col-12"><p class="mb-0"><strong>Description:</strong> ${cif.description}</p></div></div>` : ''}
+                    <div class="row mt-2">
+                        <div class="col-12">
+                            <small class="text-muted">Created by: ${cif.created_by||'-'} | Updated by: ${cif.updated_by||'-'}</small>
+                        </div>
+                    </div>
+                </div>
+            </div>`).join('');
+    }
+
+})(); // end IIFE
+</script>
+{% endblock %}

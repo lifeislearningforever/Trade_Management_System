@@ -1,0 +1,2151 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}{% if is_edit %}Edit{% else %}Create{% endif %} Trade - CisTrade{% endblock %}
+
+{% block extra_css %}
+<!-- Select2 CSS - Local -->
+<link href="{% static 'css/select2.min.css' %}" rel="stylesheet" />
+<link href="{% static 'css/select2-bootstrap-5-theme.min.css' %}" rel="stylesheet" />
+<!-- CIS Trade Hive Select2 Custom Styles -->
+<link href="{% static 'css/select2-custom.css' %}" rel="stylesheet" />
+<style>
+/* Trade form label styling — uppercase, tight tracking, muted */
+.trade-form-container .form-label {
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: #5a6a7a;
+    margin-bottom: 0.3rem;
+}
+/* Section divider headers */
+.trade-form-container .section-header {
+    font-size: 0.8rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #3d5a80;
+    padding: 0.4rem 0.6rem;
+    background: #f0f4f8;
+    border-left: 3px solid #3d5a80;
+    border-radius: 3px;
+    margin-bottom: 1rem;
+}
+/* Read-only display fields (CCY, status) */
+.trade-form-container input[readonly].form-control,
+.trade-form-container input[disabled].form-control {
+    background-color: #f5f7fa;
+    color: #495057;
+    border-color: #dee2e6;
+    font-weight: 500;
+}
+/* Validation status icons inside input-group */
+.trade-form-container .input-group-text {
+    background: #f5f7fa;
+    border-color: #dee2e6;
+    min-width: 2.4rem;
+    justify-content: center;
+}
+/* Card headers in the form */
+.trade-form-container .card-header {
+    background: linear-gradient(90deg, #f8f9fa 0%, #ffffff 100%);
+    border-bottom: 2px solid #e9ecef;
+    padding: 0.75rem 1.25rem;
+}
+.trade-form-container .card-header .card-title {
+    font-size: 0.9rem;
+    font-weight: 700;
+    color: #2c3e50;
+    letter-spacing: 0.03em;
+}
+/* Nav tabs styling */
+.trade-form-container .nav-tabs .nav-link {
+    font-size: 0.82rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    color: #6c757d;
+    padding: 0.6rem 1.2rem;
+}
+.trade-form-container .nav-tabs .nav-link.active {
+    color: #3d5a80;
+    border-bottom: 2px solid #3d5a80;
+}
+/* hr dividers */
+.trade-form-container hr.my-4 {
+    border-color: #e9ecef;
+    opacity: 1;
+}
+/* Prevent inactive tab panes from contributing height (fixes gap above Save button) */
+.trade-form-container .tab-pane:not(.active) {
+    height: 0;
+    overflow: hidden;
+    padding: 0;
+    margin: 0;
+}
+/* Force date inputs to respect their column width */
+.trade-form-container input[type="date"].form-control {
+    width: 100%;
+    min-width: 0;
+}
+/* Ensure form and container fill full available width */
+.trade-form-container,
+.trade-form-container form {
+    width: 100% !important;
+    max-width: 100% !important;
+    box-sizing: border-box;
+}
+</style>
+{% endblock %}
+
+{% block breadcrumb %}
+    <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
+    <li class="breadcrumb-item"><a href="{% url 'trade:list' %}">Trades</a></li>
+    <li class="breadcrumb-item active">{% if is_edit %}Edit {{ trade.deal_number }}{% else %}Create Trade{% endif %}</li>
+{% endblock %}
+
+{% block content %}
+<div class="trade-form-container">
+    <!-- Page Header -->
+    <div class="content-header">
+        <h1 class="content-title">
+            <i class="bi bi-{% if is_edit %}pencil{% else %}plus-circle{% endif %} text-primary"></i>
+            {% if is_edit %}Edit Trade{% else %}Create New Trade{% endif %}
+        </h1>
+        <p class="content-subtitle">
+            {% if is_edit %}
+                Editing {{ trade.deal_number }} - Status will change to MODIFIED
+            {% else %}
+                Fill in the trade details. Trade will be created with INITIAL status.
+            {% endif %}
+        </p>
+    </div>
+
+    <form method="post" id="tradeForm" class="needs-validation" novalidate>
+        {% csrf_token %}
+
+        <!-- Tab Navigation for Trade Type -->
+        <ul class="nav nav-tabs mb-4" id="tradeTabs" role="tablist">
+            <li class="nav-item" role="presentation">
+                <button class="nav-link active" id="basic-tab" data-bs-toggle="tab" data-bs-target="#basic" type="button">
+                    <i class="bi bi-info-circle"></i> Basic Info & Pricing
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="gl-tab" data-bs-toggle="tab" data-bs-target="#gl" type="button">
+                    <i class="bi bi-bank"></i> GL & Broker
+                </button>
+            </li>
+        </ul>
+
+        <!-- Tab Content -->
+        <div class="tab-content" id="tradeTabsContent">
+            <!-- Basic Info Tab -->
+            <div class="tab-pane fade show active" id="basic" role="tabpanel">
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0">Basic Trade Information</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row g-3">
+                            <!-- Trade Type -->
+                            <div class="col-md-3">
+                                <label class="form-label">Trade Type <span class="text-danger">*</span></label>
+                                <select class="form-select" name="trade_type" id="trade_type" required {% if is_edit %}disabled{% endif %}>
+                                    {% for tt in dropdown_options.trade_types %}
+                                    <option value="{{ tt.value }}"
+                                        {% if trade_type == tt.value or trade.trade_type == tt.value %}selected{% endif %}>
+                                        {{ tt.label }}
+                                    </option>
+                                    {% endfor %}
+                                </select>
+                                {% if is_edit %}
+                                <input type="hidden" name="trade_type" value="{{ trade.trade_type }}">
+                                {% endif %}
+                            </div>
+
+                            <!-- Trade Status (Read-only per SA feedback #11) -->
+                            <div class="col-md-3">
+                                <label class="form-label">Trade Status</label>
+                                {% if is_edit %}
+                                <input type="text" class="form-control bg-light" value="{{ trade.trade_status|default:'INITIAL' }}" readonly disabled>
+                                <input type="hidden" name="trade_status" value="{{ trade.trade_status }}">
+                                {% else %}
+                                <input type="text" class="form-control bg-light" value="INITIAL" readonly disabled>
+                                <input type="hidden" name="trade_status" value="">
+                                {% endif %}
+                                <small class="text-muted">Status is system-managed</small>
+                            </div>
+
+                            <!-- Trade Date -->
+                            <div class="col-md-3">
+                                <label class="form-label">Trade Date <span class="text-danger">*</span></label>
+                                <input type="date" class="form-control" name="trade_date" id="trade_date"
+                                       value="{{ trade.trade_date|default:'' }}" required>
+                                {% if not is_edit %}
+                                <small class="text-muted">
+                                    <i class="bi bi-calendar-date"></i> Default: System Date
+                                </small>
+                                {% endif %}
+                            </div>
+
+                            <!-- Settle Date -->
+                            <div class="col-md-3">
+                                <label class="form-label">Settle Date <span class="text-danger">*</span></label>
+                                <input type="date" class="form-control" name="settle_date" id="settle_date"
+                                       value="{{ trade.settle_date|default:settlement_t2_display }}" required>
+                            </div>
+                        </div>
+
+                        <hr class="my-4">
+
+                        <div class="row g-3">
+                            <!-- Portfolio -->
+                            <div class="col-md-4">
+                                <label class="form-label">Portfolio <span class="text-danger">*</span></label>
+                                <div class="input-group">
+                                    <select class="form-select" name="portfolio_short_name" id="portfolio_short_name" required
+                                            {% if is_edit %}disabled{% endif %}>
+                                        <option value="">Select Portfolio</option>
+                                        {% for p in dropdown_options.portfolios %}
+                                        <option value="{{ p.value }}"
+                                            {% if trade.portfolio_short_name == p.value %}selected{% endif %}
+                                            data-currency="{{ p.currency }}"
+                                            data-manager="{{ p.manager }}"
+                                            data-fullname="{{ p.full_name }}"
+                                            data-cost_centre="{{ p.cost_centre }}">
+                                            {{ p.label }}
+                                        </option>
+                                        {% endfor %}
+                                    </select>
+                                    <span class="input-group-text" id="portfolio_status">
+                                        <i class="bi bi-question-circle text-muted"></i>
+                                    </span>
+                                </div>
+                                {% if is_edit %}
+                                <input type="hidden" name="portfolio_short_name" value="{{ trade.portfolio_short_name }}">
+                                {% endif %}
+                                <small class="text-muted" id="portfolio_info"></small>
+                            </div>
+
+                            <!-- Portfolio Currency (auto-populated from portfolio selection - readonly) -->
+                            <div class="col-md-2">
+                                <label class="form-label">Portfolio CCY <span class="text-danger">*</span></label>
+                                <input type="text" class="form-control bg-light" id="portfolio_currency_display"
+                                       value="{{ trade.portfolio_currency|default:'' }}"
+                                       readonly placeholder="-">
+                                <input type="hidden" name="portfolio_currency" id="portfolio_currency"
+                                       value="{{ trade.portfolio_currency|default:'' }}" required>
+                            </div>
+
+                            <!-- Security (primary dropdown - select first) -->
+                            <div class="col-md-4">
+                                <label class="form-label">Security <span class="text-danger">*</span></label>
+                                <div class="input-group">
+                                    <select class="form-select" name="security_label" id="security_label" required
+                                            {% if is_edit %}disabled{% endif %}>
+                                        <option value="">Select Security</option>
+                                        {% for s in dropdown_options.securities %}
+                                        <option value="{{ s.value }}"
+                                            data-currency="{{ s.currency }}"
+                                            data-price="{{ s.price|default:0 }}"
+                                            data-fullname="{{ s.full_name }}"
+                                            data-isin="{{ s.isin }}"
+                                            data-issuer="{{ s.issuer }}"
+                                            {% if trade.security_label == s.value %}selected{% endif %}>
+                                            {{ s.label }}
+                                        </option>
+                                        {% endfor %}
+                                    </select>
+                                    <span class="input-group-text" id="security_status">
+                                        <i class="bi bi-question-circle text-muted"></i>
+                                    </span>
+                                </div>
+                                {% if is_edit %}
+                                <input type="hidden" name="security_label" value="{{ trade.security_label }}">
+                                {% endif %}
+                                <small class="text-muted" id="security_info"></small>
+                            </div>
+
+                            <!-- Currency (auto-populated from security selection - readonly) -->
+                            <div class="col-md-2">
+                                <label class="form-label">Security CCY <span class="text-danger">*</span></label>
+                                <input type="text" class="form-control bg-light" id="currency_code_display"
+                                       value="{{ trade.currency_code|default:'' }}"
+                                       readonly placeholder="-">
+                                <input type="hidden" name="currency_code" id="currency_code"
+                                       value="{{ trade.currency_code|default:'' }}" required>
+                                <small class="text-muted" id="currency_info">Auto-set from security</small>
+                            </div>
+                        </div>
+
+                        <!-- Counterparty Row -->
+                        <div class="row g-3 mt-2">
+                            <!-- Counterparty -->
+                            <div class="col-md-4">
+                                <label class="form-label">Counterparty <span class="text-danger">*</span></label>
+                                <div class="input-group">
+                                    <select class="form-select" name="counterparty" id="counterparty" required>
+                                        <option value="">Select Counterparty</option>
+                                        {% for c in dropdown_options.counterparties %}
+                                        <option value="{{ c.value }}"
+                                            {% if trade.counterparty == c.value %}selected{% endif %}
+                                            data-country="{{ c.country }}"
+                                            data-fullname="{{ c.full_name }}">
+                                            {{ c.label }}
+                                        </option>
+                                        {% endfor %}
+                                    </select>
+                                    <span class="input-group-text" id="counterparty_status">
+                                        <i class="bi bi-question-circle text-muted"></i>
+                                    </span>
+                                </div>
+                            </div>
+
+                            <!-- FX Rate (auto-populated from security/portfolio currencies) -->
+                            <div class="col-md-2">
+                                <label class="form-label">FX Rate</label>
+                                <input type="number" class="form-control" name="open_fx_rate" id="open_fx_rate"
+                                       step="0.0000001" value="{{ trade.open_fx_rate|floatformat:7|default:'' }}" placeholder="Auto-set or override">
+                                <small class="text-muted" id="fx_rate_hint">Up to 7 decimal places</small>
+                                <small class="text-muted d-block" id="fx_rate_info">Auto-set from currencies</small>
+                            </div>
+                        </div>
+
+                        <hr class="my-4">
+                        <div class="section-header"><i class="bi bi-building"></i> Broker & Custodian</div>
+
+                        <div class="row g-3">
+                            <!-- Broker (moved from GL & Broker tab) -->
+                            <div class="col-md-3">
+                                <label class="form-label">Broker</label>
+                                <select class="form-select" name="brokers" id="brokers">
+                                    <option value="">Select Broker</option>
+                                    {% for b in dropdown_options.brokers %}
+                                    <option value="{{ b.value }}"
+                                        {% if trade.brokers == b.value %}selected{% endif %}
+                                        data-country="{{ b.country }}">
+                                        {{ b.label }}
+                                    </option>
+                                    {% endfor %}
+                                </select>
+                                <small class="text-muted" id="broker_charge_info"></small>
+                            </div>
+
+                            <!-- Sub Custodian (cis_custodian_acc_details_lut.cus_code) -->
+                            <div class="col-md-3">
+                                <label class="form-label">Sub Custodian</label>
+                                <select class="form-select" name="udf_sub_custodian" id="udf_sub_custodian">
+                                    <option value="">Select Sub Custodian</option>
+                                    {% for sc in dropdown_options.sub_custodians %}
+                                    <option value="{{ sc.value }}"
+                                        {% if trade.udf_sub_custodian == sc.value %}selected{% endif %}
+                                        data-custodian="{{ sc.custodian_short_name }}">
+                                        {{ sc.label }}
+                                    </option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+
+                            <!-- Custodian (auto-set from sub custodian's custodian_short_name, cis_custodian_acc_details_lut) -->
+                            <div class="col-md-3">
+                                <label class="form-label">Custodian</label>
+                                <input type="text" class="form-control bg-light" id="custodian_display"
+                                       value="{{ trade.custodian|default:'' }}"
+                                       readonly placeholder="-">
+                                <input type="hidden" name="custodian" id="custodian"
+                                       value="{{ trade.custodian|default:'' }}">
+                                <small class="text-muted">Auto-set from sub custodian</small>
+                            </div>
+
+                            <!-- Exchange -->
+                            <div class="col-md-6">
+                                <label class="form-label">Exchange</label>
+                                <div class="input-group">
+                                    <select class="form-select" name="charge_exchange" id="charge_exchange">
+                                        <option value="">Select Exchange</option>
+                                    </select>
+                                    <span class="input-group-text d-none text-muted" id="exchange_lock_badge"
+                                          title="Exchange is fixed for this broker">
+                                        <i class="bi bi-lock-fill"></i>
+                                    </span>
+                                </div>
+                                <small class="text-muted d-none" id="exchange_lock_hint"></small>
+                            </div>
+                        </div>
+
+                        <!-- Position Info (for Sell trades) -->
+                        <div id="position_info_section" class="alert alert-info mt-3" style="display: none;">
+                            <i class="bi bi-info-circle"></i>
+                            <span id="position_info_text">Select portfolio and security to check position.</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Quantity & Pricing -->
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0"><i class="bi bi-calculator"></i> Quantity & Price</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row g-3">
+                            <div class="col-md-2">
+                                <label class="form-label">Quantity <span class="text-danger">*</span></label>
+                                <input type="number" class="form-control" name="quantity" id="quantity"
+                                       step="0.0001" min="0.0001" value="{{ trade.quantity|default:'' }}" required>
+                            </div>
+                            <div class="col-md-2">
+                                <label class="form-label">Face Value</label>
+                                <input type="number" class="form-control" name="face_value" id="face_value"
+                                       step="0.01" value="{{ trade.face_value|default:'' }}">
+                            </div>
+                            <div class="col-md-2">
+                                <label class="form-label">Lot</label>
+                                <input type="number" class="form-control" name="lot" id="lot"
+                                       step="1" value="{{ trade.lot|default:'' }}">
+                            </div>
+                            <div class="col-md-2">
+                                <label class="form-label">Price <span class="text-danger">*</span></label>
+                                <input type="number" class="form-control" name="price" id="price"
+                                       step="0.000001" min="0" value="{{ trade.price|default:'' }}" required>
+                                <small class="text-muted" id="price_hint">Up to 7 decimal places</small>
+                            </div>
+                            <div class="col-md-2">
+                                <label class="form-label">Gross Amount</label>
+                                <input type="number" class="form-control bg-light" id="gross_amount"
+                                       step="0.01" value="" readonly>
+                                <small class="text-muted">Qty × Price</small>
+                            </div>
+                        </div>
+
+                        <hr class="my-4">
+                        <div class="section-header"><i class="bi bi-receipt"></i> Costs & Fees</div>
+
+                        <div class="row g-3">
+                            <div class="col-md-2">
+                                <label class="form-label">Commission</label>
+                                <input type="number" class="form-control" name="commission" id="commission"
+                                       step="0.01" value="{{ trade.commission|default:'0' }}">
+                            </div>
+                            <div class="col-md-2">
+                                <label class="form-label">SEC Fee</label>
+                                <input type="number" class="form-control" name="sec_fee" id="sec_fee"
+                                       step="0.01" value="{{ trade.sec_fee|default:'0' }}">
+                            </div>
+                            <div class="col-md-2">
+                                <label class="form-label">Other Charges</label>
+                                <input type="number" class="form-control" name="other_charges" id="other_charges"
+                                       step="0.01" value="{{ trade.other_charges|default:'0' }}">
+                            </div>
+                            <!-- Accrued Interest removed per SA feedback #13 -->
+                            <input type="hidden" name="accrued_interest" value="0">
+                            <div class="col-md-3">
+                                <label class="form-label">Total Amount FC</label>
+                                <input type="number" class="form-control fw-bold bg-light" name="total_amount_fc" id="total_amount_fc"
+                                       step="0.01" value="{% if trade.total_amount_fc %}{{ trade.total_amount_fc }}{% elif trade.total_amount %}{{ trade.total_amount }}{% endif %}" readonly>
+                                <small class="text-muted">Gross + Fees (Security CCY)</small>
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label">Total Amount LC</label>
+                                <input type="number" class="form-control fw-bold" name="total_amount_lc" id="total_amount_lc"
+                                       step="0.01" value="{% if trade.total_amount_lc %}{{ trade.total_amount_lc }}{% endif %}"
+                                       data-user-edited="false">
+                                <small class="text-muted">Total FC × FX Rate (Portfolio CCY) — editable</small>
+                            </div>
+                        </div>
+                        <div class="row g-3 mt-1">
+                            <div class="col-md-3">
+                                <label class="form-label">Gross Amount FC</label>
+                                <input type="number" class="form-control bg-light" name="gross_amount_fc" id="gross_amount_fc"
+                                       step="0.01" value="{% if trade.gross_amount_fc %}{{ trade.gross_amount_fc }}{% endif %}" readonly>
+                                <small class="text-muted">Qty × Price (Security CCY)</small>
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label">Gross Amount LC</label>
+                                <input type="number" class="form-control fw-bold" name="gross_amount_lc" id="gross_amount_lc"
+                                       step="0.01" value="{% if trade.gross_amount_lc %}{{ trade.gross_amount_lc }}{% endif %}"
+                                       data-user-edited="false">
+                                <small class="text-muted">Gross × FX Rate (Portfolio CCY) — editable</small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Broker Charges Section -->
+                <div class="card mb-4">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="card-title mb-0"><i class="bi bi-receipt"></i> Broker Charges</h5>
+                        <div>
+                            <span id="broker_charge_info" class="text-muted small me-2"></span>
+                            <button type="button" class="btn btn-sm btn-outline-primary" onclick="calculateTotal(); calculateBrokerCharges();">
+                                <i class="bi bi-arrow-repeat"></i> Recalculate
+                            </button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div class="alert alert-info mb-3" id="no_broker_selected_msg">
+                            <i class="bi bi-info-circle"></i> Select a broker and enter quantity/price to auto-calculate charges. You can also enter values manually.
+                        </div>
+
+                        <!-- Charges table - shows lookup data -->
+                        <div id="charges_table_container" style="display: none;" class="mb-3">
+                            <h6 class="text-muted">Lookup Rates</h6>
+                            <table class="table table-sm table-bordered" id="charges_table">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th>Fee Type</th>
+                                        <th>Exchange</th>
+                                        <th>Country</th>
+                                        <th>Rule</th>
+                                        <th>Rate/Value</th>
+                                        <th>Calculated</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="charges_tbody">
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <!-- Editable charge fields -->
+                        <div class="row g-3">
+                            <div class="col-md-2">
+                                <label class="form-label">Brokerage Fee</label>
+                                <input type="number" class="form-control" name="calculated_commission" id="calculated_commission"
+                                       step="0.000001" value="{{ trade.calculated_commission|default:'0' }}" onchange="updateTotalCharges()">
+                            </div>
+                            <div class="col-md-2">
+                                <label class="form-label">Clearing Fee</label>
+                                <input type="number" class="form-control" name="calculated_clearing_fee" id="calculated_clearing_fee"
+                                       step="0.000001" value="{{ trade.calculated_clearing_fee|default:'0' }}" onchange="updateTotalCharges()">
+                            </div>
+                            <div class="col-md-2">
+                                <label class="form-label">Trading Fee</label>
+                                <input type="number" class="form-control" name="calculated_trading_fee" id="calculated_trading_fee"
+                                       step="0.000001" value="{{ trade.calculated_trading_fee|default:'0' }}" onchange="updateTotalCharges()">
+                            </div>
+                            <div class="col-md-2">
+                                <label class="form-label">GST (on fees)</label>
+                                <input type="number" class="form-control" name="calculated_gst" id="calculated_gst"
+                                       step="0.000001" value="{{ trade.calculated_gst|default:'0' }}" onchange="updateTotalCharges()">
+                            </div>
+                            <div class="col-md-2">
+                                <label class="form-label">FFP/SGX SI FEE</label>
+                                <input type="number" class="form-control" name="calculated_other_fees" id="calculated_other_fees"
+                                       step="0.000001" value="{{ trade.calculated_other_fees|default:'0' }}" onchange="updateTotalCharges()">
+                            </div>
+                            <div class="col-md-2">
+                                <label class="form-label">Total Charges</label>
+                                <input type="number" class="form-control fw-bold bg-light" name="total_calculated_charges" id="total_calculated_charges"
+                                       step="0.000001" value="{{ trade.total_calculated_charges|default:'0' }}" readonly>
+                            </div>
+                        </div>
+
+                        <!-- Hidden fields for charge metadata -->
+                        <input type="hidden" name="charge_fee_type" id="charge_fee_type" value="{{ trade.charge_fee_type|default:'' }}">
+                        <input type="hidden" name="hidden_charge_exchange" id="hidden_charge_exchange" value="{{ trade.charge_exchange|default:'' }}">
+                        <input type="hidden" name="charge_country" id="charge_country" value="{{ trade.charge_country|default:'' }}">
+                        <input type="hidden" name="charge_fee_rule" id="charge_fee_rule" value="{{ trade.charge_fee_rule|default:'' }}">
+                        <input type="hidden" name="charge_fee_value" id="charge_fee_value" value="{{ trade.charge_fee_value|default:'0' }}">
+                        <input type="hidden" name="charges_auto_calculated" id="charges_auto_calculated" value="false">
+                    </div>
+                </div>
+
+                <!-- FX & Dealing Card -->
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0"><i class="bi bi-currency-exchange"></i> FX & Dealing</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row g-3">
+                            <div class="col-md-3">
+                                <label class="form-label">Curr Dealing</label>
+                                <input type="number" class="form-control" name="curr_dealing" id="curr_dealing"
+                                       step="0.01" value="{{ trade.curr_dealing|default:'' }}">
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label">Open Dealing</label>
+                                <input type="number" class="form-control" name="open_dealing" id="open_dealing"
+                                       step="0.01" value="{{ trade.open_dealing|default:'' }}">
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label">Qty Entitled</label>
+                                <input type="number" class="form-control" name="qty_entitled" id="qty_entitled"
+                                       step="0.01" value="{{ trade.qty_entitled|default:'' }}">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Remarks (visible on main tab) -->
+                <div class="card mb-0">
+                    <div class="card-header py-2">
+                        <h5 class="card-title mb-0"><i class="bi bi-chat-left-text"></i> Remarks</h5>
+                    </div>
+                    <div class="card-body py-2">
+                        <textarea class="form-control" name="remarks" id="remarks" rows="2"
+                                  placeholder="Optional notes or remarks for this trade">{{ trade.remarks|default:'' }}</textarea>
+                    </div>
+                </div>
+            </div>
+
+            <!-- GL & Broker Tab -->
+            <div class="tab-pane fade" id="gl" role="tabpanel">
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0">GL & Settlement</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row g-3">
+                            <div class="col-md-4">
+                                <label class="form-label">Open/Close Position</label>
+                                <select class="form-select" name="open_close_position" id="open_close_position">
+                                    <option value="">Select</option>
+                                    {% for oc in dropdown_options.open_close_options %}
+                                    <option value="{{ oc.value }}"
+                                        {% if trade.open_close_position == oc.value %}selected{% endif %}>
+                                        {{ oc.label }}
+                                    </option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">Extension</label>
+                                <select class="form-select" name="extension" id="extension">
+                                    <option value="">Select</option>
+                                    {% for ext in dropdown_options.extensions %}
+                                    <option value="{{ ext.value }}"
+                                        {% if trade.extension == ext.value %}selected{% endif %}>
+                                        {{ ext.label }}
+                                    </option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">Selling Rule</label>
+                                <select class="form-select" name="selling_rule" id="selling_rule">
+                                    <option value="">Select</option>
+                                    {% for sr in dropdown_options.selling_rules %}
+                                    <option value="{{ sr.value }}"
+                                        {% if trade.selling_rule == sr.value %}selected{% endif %}>
+                                        {{ sr.label }}
+                                    </option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                        </div>
+
+                        <hr class="my-4">
+                        <div class="section-header"><i class="bi bi-journal-code"></i> GL Codes</div>
+
+                        <div class="row g-3">
+                            <div class="col-md-4">
+                                <label class="form-label">GL Fund Type</label>
+                                <select class="form-select" name="gl_fund_type" id="gl_fund_type">
+                                    <option value="">Select</option>
+                                    {% for gf in dropdown_options.gl_fund_types %}
+                                    <option value="{{ gf.value }}"
+                                        {% if trade.gl_fund_type == gf.value %}selected{% endif %}>
+                                        {{ gf.label }}
+                                    </option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">GL Cost Centre</label>
+                                <input type="text" class="form-control bg-light" id="gl_cost_centre_display"
+                                       value="{{ trade.gl_cost_centre|default:'' }}"
+                                       readonly placeholder="-">
+                                <input type="hidden" name="gl_cost_centre" id="gl_cost_centre"
+                                       value="{{ trade.gl_cost_centre|default:'' }}">
+                                <small class="text-muted">Auto-set from portfolio</small>
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">GL Account Code</label>
+                                <select class="form-select" name="gl_account_code" id="gl_account_code">
+                                    <option value="">Select</option>
+                                    {% for ga in dropdown_options.gl_account_codes %}
+                                    <option value="{{ ga.value }}"
+                                        {% if trade.gl_account_code == ga.value %}selected{% endif %}>
+                                        {{ ga.label }}
+                                    </option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                        </div>
+
+                        <hr class="my-4">
+                        <div class="section-header"><i class="bi bi-bank2"></i> Settlement</div>
+
+                        <!-- Cash Balance and Amor/Accr Method removed per SA feedback #13 -->
+                        <input type="hidden" name="amor_accr_method" value="">
+                        <input type="hidden" name="cash_balance" value="0">
+
+                        <div class="row g-3">
+                            <div class="col-md-4">
+                                <label class="form-label">Contract Reference</label>
+                                <input type="text" class="form-control" name="contract_ref" id="contract_ref"
+                                       value="{{ trade.contract_ref|default:'' }}">
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">FD Receipt</label>
+                                <input type="text" class="form-control" name="fd_receipt" id="fd_receipt"
+                                       value="{{ trade.fd_receipt|default:'' }}">
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">Original Purchase Date</label>
+                                <input type="date" class="form-control" name="org_pur_date" id="org_pur_date"
+                                       value="{{ trade.org_pur_date|default:'' }}">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- Form Actions -->
+        <div class="card mt-2">
+            <div class="card-body py-2 d-flex justify-content-between">
+                <a href="{% url 'trade:list' %}" class="btn btn-outline-secondary">
+                    <i class="bi bi-x-circle"></i> Cancel
+                </a>
+                <button type="submit" class="btn btn-primary btn-lg">
+                    <i class="bi bi-check-circle"></i>
+                    {% if is_edit %}Save Changes{% else %}Create Trade{% endif %}
+                </button>
+            </div>
+        </div>
+    </form>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<!-- jQuery (required for Select2) - Local -->
+<script src="{% static 'js/jquery-3.7.1.min.js' %}"></script>
+
+<!-- Select2 JS - Local -->
+<script src="{% static 'js/select2.min.js' %}"></script>
+
+<!-- CIS Trade Hive Select2 Global Initialization -->
+<script src="{% static 'js/select2-init.js' %}"></script>
+
+<script>
+// Some environments render/display numeric <input type="number"> fields with a
+// thousands-separator comma in the value (server-side data and template are
+// confirmed clean -- this guards against it regardless of source, e.g. a
+// browser extension or regional number formatting reformatting the field).
+// A number input silently discards .value the instant it can't parse the
+// attribute, but getAttribute('value') still returns the original raw text,
+// so re-normalize from that on load.
+(function() {
+    document.querySelectorAll('input[type="number"]').forEach(function(el) {
+        var raw = el.getAttribute('value');
+        if (raw && /[,]/.test(raw)) {
+            var cleaned = raw.replace(/,/g, '');
+            el.setAttribute('value', cleaned);
+            el.value = cleaned;
+        }
+    });
+})();
+
+// Track pending validation requests to prevent race conditions
+let pendingPortfolioRequest = null;
+let pendingSecurityRequest = null;
+
+// Validate portfolio on selection change
+document.getElementById('portfolio_short_name').addEventListener('change', function() {
+    const portfolioName = this.value;
+    const statusIcon = document.getElementById('portfolio_status');
+    const infoText = document.getElementById('portfolio_info');
+
+    // Cancel any pending request
+    if (pendingPortfolioRequest) {
+        pendingPortfolioRequest.abort();
+    }
+
+    // Auto-populate portfolio currency from selected option
+    autoPopulateCurrencyFromPortfolio();
+    autoPopulateCostCentreFromPortfolio();
+
+    if (!portfolioName) {
+        statusIcon.innerHTML = '<i class="bi bi-question-circle text-muted"></i>';
+        infoText.textContent = '';
+        return;
+    }
+
+    statusIcon.innerHTML = '<div class="spinner-border spinner-border-sm" role="status"></div>';
+    infoText.textContent = 'Validating...';
+    infoText.className = 'text-muted small';
+
+    // Create AbortController for this request
+    const controller = new AbortController();
+    pendingPortfolioRequest = controller;
+
+    fetch(`/trade/api/validate-portfolio/?name=${encodeURIComponent(portfolioName)}`, {
+        signal: controller.signal
+    })
+        .then(response => response.json())
+        .then(data => {
+            console.log('Portfolio validation response:', data);
+            // Check is_valid as boolean (handle string 'true'/'false' too)
+            const isValid = data.is_valid === true || data.is_valid === 'true';
+            if (isValid) {
+                statusIcon.innerHTML = '<i class="bi bi-check-circle-fill text-success"></i>';
+                infoText.textContent = data.message || 'Valid';
+                infoText.className = 'text-success small';
+            } else {
+                statusIcon.innerHTML = '<i class="bi bi-x-circle-fill text-danger"></i>';
+                infoText.textContent = data.message || 'Invalid';
+                infoText.className = 'text-danger small';
+            }
+            checkPosition();
+        })
+        .catch(error => {
+            if (error.name === 'AbortError') {
+                console.log('Portfolio validation request aborted');
+                return;
+            }
+            console.error('Portfolio validation error:', error);
+            statusIcon.innerHTML = '<i class="bi bi-exclamation-circle text-warning"></i>';
+            infoText.textContent = 'Error validating portfolio';
+            infoText.className = 'text-warning small';
+        });
+});
+
+// Auto-fill custodian when sub custodian changes (native fallback -- Select2's
+// select2:select handler covers the usual dropdown-click path).
+document.getElementById('udf_sub_custodian').addEventListener('change', function() {
+    autoPopulateCustodianFromSubCustodian();
+});
+
+// Validate security on selection change
+document.getElementById('security_label').addEventListener('change', function() {
+    const securityName = this.value;
+    const statusIcon = document.getElementById('security_status');
+    const infoText = document.getElementById('security_info');
+
+    // Cancel any pending request
+    if (pendingSecurityRequest) {
+        pendingSecurityRequest.abort();
+    }
+
+    if (!securityName) {
+        statusIcon.innerHTML = '<i class="bi bi-question-circle text-muted"></i>';
+        infoText.textContent = '';
+        return;
+    }
+
+    statusIcon.innerHTML = '<div class="spinner-border spinner-border-sm" role="status"></div>';
+    infoText.textContent = 'Validating...';
+    infoText.className = 'text-muted small';
+
+    // Create AbortController for this request
+    const controller = new AbortController();
+    pendingSecurityRequest = controller;
+
+    fetch(`/trade/api/validate-security/?name=${encodeURIComponent(securityName)}`, {
+        signal: controller.signal
+    })
+        .then(response => response.json())
+        .then(data => {
+            console.log('Security validation response:', data);
+            // Check is_valid as boolean (handle string 'true'/'false' too)
+            const isValid = data.is_valid === true || data.is_valid === 'true';
+            if (isValid) {
+                statusIcon.innerHTML = '<i class="bi bi-check-circle-fill text-success"></i>';
+                infoText.textContent = data.message || 'Valid';
+                infoText.className = 'text-success small';
+
+                // Auto-fill price if available
+                const selectedOption = document.querySelector(`#security_label option[value="${securityName}"]`);
+                if (selectedOption && selectedOption.dataset.price) {
+                    const priceField = document.getElementById('price');
+                    if (!priceField.value) {
+                        priceField.value = selectedOption.dataset.price;
+                    }
+                }
+            } else {
+                statusIcon.innerHTML = '<i class="bi bi-x-circle-fill text-danger"></i>';
+                infoText.textContent = data.message || 'Invalid';
+                infoText.className = 'text-danger small';
+            }
+            checkPosition();
+        })
+        .catch(error => {
+            if (error.name === 'AbortError') {
+                console.log('Security validation request aborted');
+                return;
+            }
+            console.error('Security validation error:', error);
+            statusIcon.innerHTML = '<i class="bi bi-exclamation-circle text-warning"></i>';
+            infoText.textContent = 'Error validating security';
+            infoText.className = 'text-warning small';
+        });
+});
+
+// Check position for Sell trades
+function checkPosition() {
+    const tradeTypeEl = document.getElementById('trade_type');
+    const portfolioEl = document.getElementById('portfolio_short_name');
+    const securityEl = document.getElementById('security_label');
+    const positionSection = document.getElementById('position_info_section');
+    const positionText = document.getElementById('position_info_text');
+
+    // Safety check - if elements don't exist, just return
+    if (!tradeTypeEl || !portfolioEl || !securityEl || !positionSection || !positionText) {
+        return;
+    }
+
+    const tradeType = tradeTypeEl.value;
+    const portfolio = portfolioEl.value;
+    const security = securityEl.value;
+
+    if (tradeType !== 'SELL' || !portfolio || !security) {
+        positionSection.style.display = 'none';
+        return;
+    }
+
+    positionSection.style.display = 'block';
+    positionText.innerHTML = '<div class="spinner-border spinner-border-sm" role="status"></div> Checking position...';
+
+    fetch(`/trade/api/position/?portfolio=${encodeURIComponent(portfolio)}&security=${encodeURIComponent(security)}`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.exists) {
+                positionText.innerHTML = `<strong>Current Position:</strong> ${data.quantity} units at avg cost ${data.average_cost}`;
+                positionSection.className = 'alert alert-info mt-3';
+            } else {
+                positionText.innerHTML = '<strong>Warning:</strong> No position found for this portfolio-security combination.';
+                positionSection.className = 'alert alert-warning mt-3';
+            }
+        })
+        .catch(error => {
+            positionText.innerHTML = 'Error checking position';
+            positionSection.className = 'alert alert-danger mt-3';
+        });
+}
+
+// Calculate Gross Amount (Quantity × Price)
+function calculateGrossAmount() {
+    const quantity = parseFloat(document.getElementById('quantity').value) || 0;
+    const price = parseFloat(document.getElementById('price').value) || 0;
+    const grossAmount = quantity * price;
+
+    const grossAmountField = document.getElementById('gross_amount');
+    if (grossAmountField) {
+        grossAmountField.value = grossAmount.toFixed(2);
+    }
+
+    return grossAmount;
+}
+
+// Calculate total amount: Gross Amount + Commission + SEC Fee + Other Charges
+// Calculates both FC (Foreign/Security Currency) and LC (Local/Portfolio Currency)
+function calculateTotal() {
+    const grossAmount = calculateGrossAmount();
+    const commission = parseFloat(document.getElementById('commission').value) || 0;
+    const secFee = parseFloat(document.getElementById('sec_fee').value) || 0;
+    const otherCharges = parseFloat(document.getElementById('other_charges').value) || 0;
+    const fxRate = parseFloat(document.getElementById('open_fx_rate').value) || 1;
+
+    const tradeType = document.getElementById('trade_type').value;
+    let totalFC = grossAmount;
+
+    if (tradeType === 'BUY') {
+        totalFC = grossAmount + commission + secFee + otherCharges;
+    } else if (tradeType === 'SELL') {
+        totalFC = grossAmount - commission - secFee - otherCharges;
+    } else {
+        totalFC = grossAmount + commission + secFee + otherCharges;
+    }
+
+    // Update total FC field
+    const totalFCField = document.getElementById('total_amount_fc');
+    if (totalFCField) {
+        totalFCField.value = totalFC.toFixed(2);
+    }
+
+    // Update gross FC field (readonly display, qty × price)
+    const grossFCField = document.getElementById('gross_amount_fc');
+    if (grossFCField) {
+        grossFCField.value = grossAmount.toFixed(2);
+    }
+
+    const grossLCField = document.getElementById('gross_amount_lc');
+    const totalLCField = document.getElementById('total_amount_lc');
+    const grossEdited = grossLCField && grossLCField.dataset.userEdited === 'true';
+    const totalEdited = totalLCField && totalLCField.dataset.userEdited === 'true';
+
+    if (!grossEdited && !totalEdited) {
+        // Neither edited — auto-compute both from FX rate
+        if (grossLCField) grossLCField.value = (grossAmount * fxRate).toFixed(2);
+        if (totalLCField) totalLCField.value = (totalFC * fxRate).toFixed(2);
+    } else if (grossEdited && !totalEdited) {
+        // User edited gross LC — derive total LC proportionally
+        const grossLC = parseFloat(grossLCField.value) || 0;
+        if (totalLCField && grossAmount > 0) {
+            totalLCField.value = (grossLC * totalFC / grossAmount).toFixed(2);
+        }
+    } else if (totalEdited && !grossEdited) {
+        // User edited total LC — derive gross LC proportionally
+        const totalLC = parseFloat(totalLCField.value) || 0;
+        if (grossLCField && totalFC > 0) {
+            grossLCField.value = (totalLC * grossAmount / totalFC).toFixed(2);
+        }
+    }
+    // If both edited — leave both as-is (user has full control)
+}
+
+// Update total broker charges when individual charge fields change
+function updateTotalCharges() {
+    const brokerageFee = parseFloat(document.getElementById('calculated_commission').value) || 0;
+    const clearingFee = parseFloat(document.getElementById('calculated_clearing_fee').value) || 0;
+    const tradingFee = parseFloat(document.getElementById('calculated_trading_fee').value) || 0;
+    const gst = parseFloat(document.getElementById('calculated_gst').value) || 0;
+    const otherFees = parseFloat(document.getElementById('calculated_other_fees').value) || 0;
+
+    const totalCharges = brokerageFee + clearingFee + tradingFee + gst + otherFees;
+    document.getElementById('total_calculated_charges').value = totalCharges.toFixed(2);
+
+    // Also update commission field with total broker charges
+    document.getElementById('commission').value = totalCharges.toFixed(2);
+
+    // Recalculate total amount
+    calculateTotal();
+}
+
+// Trade type change handler
+document.getElementById('trade_type').addEventListener('change', function() {
+    checkPosition();
+});
+
+// Auto-calculate on input change
+['quantity', 'price', 'commission', 'sec_fee', 'other_charges'].forEach(function(fieldId) {
+    const el = document.getElementById(fieldId);
+    if (el) {
+        el.addEventListener('input', calculateTotal);
+    }
+});
+
+// FX rate: recalculate totals on both input (keystrokes) and change (paste, blur, spinner)
+var fxRateEl = document.getElementById('open_fx_rate');
+if (fxRateEl) {
+    fxRateEl.addEventListener('input', calculateTotal);
+    fxRateEl.addEventListener('change', calculateTotal);
+}
+
+// Mark LC fields as user-edited when typed directly — prevents auto-overwrite.
+['gross_amount_lc', 'total_amount_lc'].forEach(function(id) {
+    var el = document.getElementById(id);
+    if (el) {
+        el.addEventListener('input', function() {
+            this.dataset.userEdited = 'true';
+        });
+    }
+});
+
+// Auto-calculate gross amount on quantity/price change
+['quantity', 'price'].forEach(function(fieldId) {
+    const el = document.getElementById(fieldId);
+    if (el) {
+        el.addEventListener('input', calculateGrossAmount);
+    }
+});
+
+// Form validation
+document.getElementById('tradeForm').addEventListener('submit', function(event) {
+    if (!this.checkValidity()) {
+        event.preventDefault();
+        event.stopPropagation();
+    }
+    this.classList.add('was-validated');
+});
+
+// Initialize on page load
+document.addEventListener('DOMContentLoaded', function() {
+    checkPosition();
+
+    // Set default trade date to system date for new trades (not edit)
+    // Uses system_date_display from context processor (GMP file date with override support)
+    const tradeDateEl = document.getElementById('trade_date');
+    const isEditMode = {{ is_edit|yesno:"true,false" }};
+    if (tradeDateEl && !isEditMode && !tradeDateEl.value) {
+        // Use system date from context processor (format: YYYY-MM-DD)
+        const systemDate = '{{ system_date_display|default:"" }}';
+        if (systemDate) {
+            tradeDateEl.value = systemDate;
+            console.log('Trade date set to system date:', systemDate);
+        } else {
+            // Fallback to today if system date not available
+            const today = new Date();
+            const yyyy = today.getFullYear();
+            const mm = String(today.getMonth() + 1).padStart(2, '0');
+            const dd = String(today.getDate()).padStart(2, '0');
+            tradeDateEl.value = `${yyyy}-${mm}-${dd}`;
+            console.log('System date not available, using today:', tradeDateEl.value);
+        }
+    }
+
+    // If editing and portfolio is already set, auto-populate portfolio currency display
+    // but do NOT call fetchFxRate() — the saved trade.open_fx_rate is already correct
+    const portfolioEl = document.getElementById('portfolio_short_name');
+    if (portfolioEl && portfolioEl.value) {
+        if (isEditMode) {
+            autoPopulateCurrencyFromPortfolioNoFx();
+        } else {
+            autoPopulateCurrencyFromPortfolio();
+        }
+        autoPopulateCostCentreFromPortfolio();
+    }
+
+    // If editing and sub custodian is already set, auto-populate custodian display
+    const subCustodianEl = document.getElementById('udf_sub_custodian');
+    if (subCustodianEl && subCustodianEl.value) {
+        autoPopulateCustodianFromSubCustodian();
+    }
+
+    // If editing and security is already set, auto-populate currency display only
+    const securityEl = document.getElementById('security_label');
+    if (securityEl && securityEl.value) {
+        if (isEditMode) {
+            autoPopulateCurrencyFromSecurityNoFx();
+        } else {
+            autoPopulateCurrencyFromSecurity();
+        }
+    }
+
+    // Load exchanges dropdown
+    loadExchanges();
+
+    // If editing and broker is already set, restore exchange lock state then load charges
+    const brokerEl = document.getElementById('brokers');
+    if (brokerEl && brokerEl.value) {
+        fetch(`/trade/api/exchanges-for-broker/?broker=${encodeURIComponent(brokerEl.value)}`)
+            .then(r => r.json())
+            .then(data => {
+                const exchanges = data.results || [];
+                const exchangeEl = document.getElementById('charge_exchange');
+                if (exchangeEl) {
+                    exchangeEl.innerHTML = '<option value="">Select Exchange</option>';
+                    exchanges.forEach(function(ex) {
+                        const opt = document.createElement('option');
+                        opt.value = ex.value;
+                        opt.textContent = ex.label;
+                        exchangeEl.appendChild(opt);
+                    });
+                    // Restore saved exchange value (edit mode)
+                    const savedExchange = "{{ trade.charge_exchange|default:'' }}";
+                    if (savedExchange) exchangeEl.value = savedExchange;
+                    if (exchanges.length === 1) setExchangeLock(true, exchanges[0].label);
+                }
+                calculateBrokerCharges();
+            })
+            .catch(() => calculateBrokerCharges());
+    }
+
+    // Calculate gross amount and total on page load (for edit mode)
+    calculateGrossAmount();
+    calculateTotal();
+});
+
+// =========================================================================
+// BROKER CHARGE CALCULATION
+// =========================================================================
+
+// Load exchanges dropdown from API
+function loadExchanges() {
+    const exchangeEl = document.getElementById('charge_exchange');
+    if (!exchangeEl) {
+        console.log('Exchange dropdown not found');
+        return;
+    }
+
+    fetch('/trade/api/exchanges/')
+        .then(response => {
+            if (!response.ok) {
+                throw new Error('API returned ' + response.status);
+            }
+            return response.json();
+        })
+        .then(data => {
+            if (data.results) {
+                // Keep the first empty option
+                const currentValue = exchangeEl.value;
+                exchangeEl.innerHTML = '<option value="">Select Exchange</option>';
+                data.results.forEach(function(ex) {
+                    const option = document.createElement('option');
+                    option.value = ex.value;
+                    option.textContent = ex.label;
+                    option.dataset.country = ex.country;
+                    if (ex.value === currentValue) {
+                        option.selected = true;
+                    }
+                    exchangeEl.appendChild(option);
+                });
+            }
+        })
+        .catch(error => {
+            console.log('Could not load exchanges:', error);
+            // Add default exchange options
+            exchangeEl.innerHTML = '<option value="">Select Exchange</option><option value="SGX">SGX (SG)</option>';
+        });
+}
+
+function setExchangeLock(locked, label) {
+    const exchangeEl   = document.getElementById('charge_exchange');
+    const lockBadge    = document.getElementById('exchange_lock_badge');
+    const lockHint     = document.getElementById('exchange_lock_hint');
+    if (!exchangeEl) return;
+    if (locked) {
+        exchangeEl.disabled = true;
+        exchangeEl.classList.add('bg-light');
+        if (lockBadge) lockBadge.classList.remove('d-none');
+        if (lockHint)  { lockHint.textContent = `Fixed to ${label} for this broker`; lockHint.classList.remove('d-none'); }
+    } else {
+        exchangeEl.disabled = false;
+        exchangeEl.classList.remove('bg-light');
+        if (lockBadge) lockBadge.classList.add('d-none');
+        if (lockHint)  { lockHint.textContent = ''; lockHint.classList.add('d-none'); }
+    }
+}
+
+// Broker dropdown change handler — auto-set exchange from LUT then calculate
+const brokersEl = document.getElementById('brokers');
+if (brokersEl) {
+    brokersEl.addEventListener('change', function() {
+        const broker = this.value;
+        const exchangeEl = document.getElementById('charge_exchange');
+        if (!broker || !exchangeEl) {
+            // Broker cleared — unlock and restore full exchange list
+            setExchangeLock(false, '');
+            loadExchanges();
+            calculateBrokerCharges();
+            return;
+        }
+        // Fetch exchanges available for this broker
+        fetch(`/trade/api/exchanges-for-broker/?broker=${encodeURIComponent(broker)}`)
+            .then(r => r.json())
+            .then(data => {
+                const exchanges = data.results || [];
+                // Rebuild exchange dropdown scoped to this broker
+                exchangeEl.innerHTML = '<option value="">Select Exchange</option>';
+                exchanges.forEach(function(ex) {
+                    const opt = document.createElement('option');
+                    opt.value = ex.value;
+                    opt.textContent = ex.label;
+                    opt.dataset.country = ex.country;
+                    exchangeEl.appendChild(opt);
+                });
+                if (exchanges.length === 1) {
+                    // Exactly one exchange for this broker — auto-select and lock
+                    exchangeEl.value = exchanges[0].value;
+                    setExchangeLock(true, exchanges[0].label);
+                } else {
+                    // Multiple exchanges — user must pick, but field is enabled
+                    setExchangeLock(false, '');
+                }
+                calculateBrokerCharges();
+            })
+            .catch(() => calculateBrokerCharges());
+    });
+}
+console.log('Broker element found:', !!brokersEl);
+
+// Exchange dropdown change handler - recalculate charges
+const chargeExchangeEl = document.getElementById('charge_exchange');
+if (chargeExchangeEl) {
+    chargeExchangeEl.addEventListener('change', function() {
+        applyChargeRoundingRule();
+        calculateBrokerCharges();
+    });
+}
+
+// UOB KAY HIAN* + SGX broker charge rounding rule
+// When broker contains "UOB KAY HIAN" and exchange is "SGX", broker charges are rounded to 2dp.
+// Price itself is NOT rounded — it can have up to 6dp regardless of broker/exchange.
+function applyChargeRoundingRule() {
+    var broker   = (document.getElementById('brokers')        || {}).value || '';
+    var exchange = (document.getElementById('charge_exchange') || {}).value || '';
+
+    var isUobSgx = broker.toUpperCase().indexOf('UOB KAY HIAN') !== -1 && exchange.toUpperCase() === 'SGX';
+
+    var chargeFields = ['commission', 'calculated_commission', 'other_charges', 'total_calculated_charges'];
+    chargeFields.forEach(function(fieldId) {
+        var el = document.getElementById(fieldId);
+        if (!el) return;
+        if (isUobSgx) {
+            var val = parseFloat(el.value);
+            if (!isNaN(val) && val !== 0) el.value = val.toFixed(2);
+            el.step = '0.01';
+        } else {
+            el.step = '0.000001';
+        }
+    });
+}
+
+// Apply charge rounding when broker or exchange changes
+if (brokersEl) {
+    brokersEl.addEventListener('change', function() {
+        applyChargeRoundingRule();
+    });
+}
+
+// Enforce max decimal places on a number input — truncates extra digits as user types
+function enforceMaxDecimals(el, maxDp) {
+    if (!el) return;
+    el.addEventListener('input', function() {
+        var val = this.value;
+        var dotPos = val.indexOf('.');
+        if (dotPos !== -1 && val.length - dotPos - 1 > maxDp) {
+            this.value = parseFloat(val).toFixed(maxDp);
+        }
+    });
+    el.addEventListener('blur', function() {
+        var val = parseFloat(this.value);
+        if (!isNaN(val)) {
+            this.value = parseFloat(val.toFixed(maxDp));
+        }
+    });
+}
+
+// Quantity: max 4 decimal places
+enforceMaxDecimals(document.getElementById('quantity'), 4);
+
+// Price: max 6 decimal places
+(function() {
+    var priceEl  = document.getElementById('price');
+    var priceHint = document.getElementById('price_hint');
+    enforceMaxDecimals(priceEl, 6);
+    if (priceEl && priceHint) {
+        priceEl.addEventListener('focus', function() {
+            priceHint.textContent = 'Up to 7 decimal places';
+            priceHint.className = 'text-muted';
+        });
+    }
+})();
+
+// FX Rate: max 6 decimal places
+(function() {
+    var fxEl   = document.getElementById('open_fx_rate');
+    var fxHint = document.getElementById('fx_rate_hint');
+    enforceMaxDecimals(fxEl, 7);
+    if (fxEl && fxHint) {
+        fxEl.addEventListener('focus', function() {
+            fxHint.textContent = 'Up to 7 decimal places';
+            fxHint.className = 'text-muted';
+        });
+        fxEl.addEventListener('blur', function() {
+            fxHint.textContent = 'Up to 7 decimal places';
+            fxHint.className = 'text-muted';
+        });
+    }
+})();
+
+// Recalculate charges when quantity or price changes
+['quantity', 'price'].forEach(function(fieldId) {
+    const el = document.getElementById(fieldId);
+    if (el) {
+        el.addEventListener('input', function() {
+            calculateBrokerCharges();
+        });
+    }
+});
+
+// Calculate broker charges based on broker, quantity, price
+function calculateBrokerCharges() {
+    const brokersField = document.getElementById('brokers');
+    const quantityField = document.getElementById('quantity');
+    const priceField = document.getElementById('price');
+    const tradeTypeField = document.getElementById('trade_type');
+    const exchangeField = document.getElementById('charge_exchange');
+    const currencyField = document.getElementById('currency_code');
+
+    // Check if required elements exist
+    if (!brokersField || !quantityField || !priceField) {
+        console.log('ERROR: Required form fields not found');
+        console.log('  brokersField:', !!brokersField);
+        console.log('  quantityField:', !!quantityField);
+        console.log('  priceField:', !!priceField);
+        return;
+    }
+
+    const broker = brokersField.value;
+    const quantity = parseFloat(quantityField.value) || 0;
+    const price = parseFloat(priceField.value) || 0;
+    const tradeType = tradeTypeField ? tradeTypeField.value : 'BUY';
+    const exchange = exchangeField ? exchangeField.value : '';
+    const currency = currencyField ? currencyField.value : '';
+
+    console.log('Input values:');
+    console.log('  broker:', broker);
+    console.log('  quantity:', quantity);
+    console.log('  price:', price);
+    console.log('  tradeType:', tradeType);
+    console.log('  exchange:', exchange);
+
+    const noBrokerMsg = document.getElementById('no_broker_selected_msg');
+    const chargesContainer = document.getElementById('charges_table_container');
+    const chargesTbody = document.getElementById('charges_tbody');
+    const brokerChargeInfo = document.getElementById('broker_charge_info');
+
+    // Log element status (don't return - continue even if display elements missing)
+    console.log('Display elements found:', {
+        noBrokerMsg: !!noBrokerMsg,
+        chargesContainer: !!chargesContainer,
+        chargesTbody: !!chargesTbody,
+        brokerChargeInfo: !!brokerChargeInfo
+    });
+
+    if (!broker) {
+        // No broker selected
+        console.log('No broker selected - showing message');
+        if (noBrokerMsg) noBrokerMsg.style.display = 'block';
+        if (chargesContainer) chargesContainer.style.display = 'none';
+        if (brokerChargeInfo) brokerChargeInfo.textContent = '';
+        resetChargeFields();
+        return;
+    }
+
+    if (quantity <= 0 || price <= 0) {
+        // Need quantity and price to calculate
+        console.log('Quantity or price not set - quantity:', quantity, 'price:', price);
+        if (noBrokerMsg) {
+            noBrokerMsg.innerHTML = '<i class="bi bi-info-circle"></i> Enter quantity and price to calculate charges.';
+            noBrokerMsg.style.display = 'block';
+        }
+        if (chargesContainer) chargesContainer.style.display = 'none';
+        return;
+    }
+
+    console.log('All conditions met - calling API...');
+
+    // Fetch calculated charges from API
+    let url = `/trade/api/calculate-charges/?broker=${encodeURIComponent(broker)}&quantity=${quantity}&price=${price}&trade_type=${tradeType}`;
+    if (exchange) {
+        url += `&exchange=${encodeURIComponent(exchange)}`;
+    }
+    if (currency) {
+        url += `&currency=${encodeURIComponent(currency)}`;
+    }
+
+    console.log('Fetching broker charges from:', url);
+
+    fetch(url)
+        .then(response => response.json())
+        .then(data => {
+            console.log('Broker charges API response:', data);
+
+            if (data.error) {
+                console.log('API returned error:', data.error);
+                if (noBrokerMsg) {
+                    noBrokerMsg.innerHTML = `<i class="bi bi-exclamation-circle"></i> ${data.error}`;
+                    noBrokerMsg.style.display = 'block';
+                }
+                if (chargesContainer) chargesContainer.style.display = 'none';
+                return;
+            }
+
+            const charges = data.charges || [];
+            if (charges.length === 0) {
+                console.log('No charges found for broker:', broker);
+                if (noBrokerMsg) {
+                    noBrokerMsg.innerHTML = `<i class="bi bi-info-circle"></i> No charge rules found for broker: "${broker}". Check cis_trade_charge_lut table.`;
+                    noBrokerMsg.style.display = 'block';
+                }
+                if (chargesContainer) chargesContainer.style.display = 'none';
+                if (brokerChargeInfo) brokerChargeInfo.textContent = 'No charges configured';
+                resetChargeFields();
+                return;
+            }
+
+            console.log('Found', charges.length, 'charges for broker');
+
+            // Hide no broker message, show charges table
+            if (noBrokerMsg) noBrokerMsg.style.display = 'none';
+            if (chargesContainer) chargesContainer.style.display = 'block';
+
+            // Rounding precision: use broker/exchange already captured for the API call
+            var _dispIsUobSgx = broker.toUpperCase().indexOf('UOB KAY HIAN') !== -1 && exchange.toUpperCase() === 'SGX';
+            var _dispDp = _dispIsUobSgx ? 2 : 6;
+
+            // Clear and populate charges table
+            if (chargesTbody) chargesTbody.innerHTML = '';
+            let calculatedCommission = 0;  // Brokerage Fee
+            let calculatedClearingFee = 0;  // Clearing Fee
+            let calculatedTradingFee = 0;  // Trading Fee
+            let calculatedGst = 0;  // GST
+            let calculatedOtherFees = 0;  // FFP/SGX SI FEE, etc.
+
+            charges.forEach(function(charge) {
+                const row = document.createElement('tr');
+
+                // Format fee value display based on fee_rule (Percent or Flat)
+                let feeDisplay = '';
+                if (charge.fee_rule.toLowerCase() === 'percent') {
+                    feeDisplay = charge.fee_value.toFixed(4) + '%';
+                } else if (charge.fee_rule.toLowerCase() === 'flat') {
+                    feeDisplay = charge.fee_value.toFixed(4) + ' (Flat)';
+                } else {
+                    feeDisplay = charge.fee_value.toFixed(4);
+                }
+
+                row.innerHTML = `
+                    <td><span class="badge bg-secondary">${charge.fee_type}</span></td>
+                    <td>${charge.exchange || '-'}</td>
+                    <td>${charge.country_of_exchange || '-'}</td>
+                    <td>${charge.fee_rule}</td>
+                    <td>${feeDisplay}</td>
+                    <td class="text-end fw-bold">${charge.calculated_fee.toFixed(_dispDp)}</td>
+                `;
+                if (chargesTbody) chargesTbody.appendChild(row);
+
+                // Sum up by fee type (matches cis_trade_charge_lut fee_type values)
+                const feeTypeLower = charge.fee_type.toLowerCase();
+                if (feeTypeLower.includes('brokerage')) {
+                    calculatedCommission += charge.calculated_fee;
+                } else if (feeTypeLower.includes('clearing')) {
+                    calculatedClearingFee += charge.calculated_fee;
+                } else if (feeTypeLower.includes('trading')) {
+                    calculatedTradingFee += charge.calculated_fee;
+                } else if (feeTypeLower.includes('gst')) {
+                    calculatedGst += charge.calculated_fee;
+                } else {
+                    // FFP/SGX SI FEE and other fees
+                    calculatedOtherFees += charge.calculated_fee;
+                }
+            });
+
+            // Update hidden fields (matches cis_trade columns) — use same _dispDp from above
+            document.getElementById('calculated_commission').value = calculatedCommission.toFixed(_dispDp);
+            document.getElementById('calculated_clearing_fee').value = calculatedClearingFee.toFixed(_dispDp);
+            document.getElementById('calculated_trading_fee').value = calculatedTradingFee.toFixed(_dispDp);
+            document.getElementById('calculated_gst').value = calculatedGst.toFixed(_dispDp);
+            document.getElementById('calculated_other_fees').value = calculatedOtherFees.toFixed(_dispDp);
+            document.getElementById('total_calculated_charges').value = data.total_charges.toFixed(_dispDp);
+            document.getElementById('charges_auto_calculated').value = 'true';
+
+            // Set first charge details to hidden fields
+            if (charges.length > 0) {
+                const firstCharge = charges[0];
+                document.getElementById('charge_fee_type').value = firstCharge.fee_type;
+                document.getElementById('hidden_charge_exchange').value = firstCharge.exchange || '';
+                document.getElementById('charge_country').value = firstCharge.country_of_exchange || '';
+                document.getElementById('charge_fee_rule').value = firstCharge.fee_rule;
+                document.getElementById('charge_fee_value').value = firstCharge.fee_value;
+            }
+
+            // Update broker charge info display
+            brokerChargeInfo.textContent = `${charges.length} charge(s) - Total: ${data.total_charges.toFixed(_dispDp)}`;
+            brokerChargeInfo.className = 'text-success small';
+
+            // Auto-fill commission field with total calculated charges
+            const commissionField = document.getElementById('commission');
+            if (commissionField) {
+                commissionField.value = data.total_charges.toFixed(_dispDp);
+            }
+
+            // Recalculate total
+            calculateTotal();
+        })
+        .catch(error => {
+            console.error('Error calculating charges:', error);
+            noBrokerMsg.innerHTML = '<i class="bi bi-exclamation-circle"></i> Error loading charges.';
+            noBrokerMsg.style.display = 'block';
+            chargesContainer.style.display = 'none';
+        });
+}
+
+// Reset charge hidden fields (matches cis_trade columns)
+function resetChargeFields() {
+    document.getElementById('charge_fee_type').value = '';
+    document.getElementById('hidden_charge_exchange').value = '';
+    document.getElementById('charge_country').value = '';
+    document.getElementById('charge_fee_rule').value = '';
+    document.getElementById('charge_fee_value').value = '0';
+    document.getElementById('calculated_commission').value = '0';
+    document.getElementById('calculated_clearing_fee').value = '0';
+    document.getElementById('calculated_trading_fee').value = '0';
+    document.getElementById('calculated_gst').value = '0';
+    document.getElementById('calculated_other_fees').value = '0';
+    document.getElementById('total_calculated_charges').value = '0';
+    document.getElementById('charges_auto_calculated').value = 'false';
+    // Also reset commission field
+    document.getElementById('commission').value = '0';
+}
+
+// =========================================================================
+// SECURITY-CURRENCY CASCADING DROPDOWN (Security first, Currency auto-fills)
+// =========================================================================
+
+// Security dropdown change handler - auto-populate currency and price
+document.getElementById('security_label').addEventListener('change', function() {
+    const securityLabel = this.value;
+    const priceField = document.getElementById('price');
+    const currencyHidden = document.getElementById('currency_code');
+    const currencyDisplay = document.getElementById('currency_code_display');
+    const currencyInfo = document.getElementById('currency_info');
+    const securityInfo = document.getElementById('security_info');
+
+    if (!securityLabel) {
+        // Reset currency to default (both hidden and display fields)
+        currencyHidden.value = '';
+        currencyDisplay.value = '';
+        if (currencyInfo) { currencyInfo.textContent = 'Auto-set from security'; currencyInfo.className = 'text-muted small'; }
+        if (securityInfo) { securityInfo.textContent = ''; }
+        return;
+    }
+
+    // Auto-populate currency from selected security's data-currency attribute
+    autoPopulateCurrencyFromSecurity();
+
+    // Auto-select counterparty from security issuer
+    autoSelectCounterpartyFromSecurity();
+
+    // Fetch price from equity price table via API
+    const currencyCode = currencyHidden.value;
+    if (currencyCode) {
+        fetch(`/trade/api/equity-price/?security=${encodeURIComponent(securityLabel)}&currency=${encodeURIComponent(currencyCode)}`)
+            .then(response => response.json())
+            .then(data => {
+                if (data.found && data.price > 0) {
+                    priceField.value = parseFloat(data.price).toFixed(4);
+                    if (securityInfo) { securityInfo.textContent = `Price: ${data.price} (${data.price_date || 'latest'})`; securityInfo.className = 'text-success small'; }
+                } else {
+                    if (securityInfo) { securityInfo.textContent = 'No equity price found for this security'; securityInfo.className = 'text-warning small'; }
+                }
+            })
+            .catch(error => {
+                console.log('Could not fetch equity price:', error);
+            });
+    }
+});
+
+// Auto-select counterparty dropdown based on current security's issuer field
+function autoSelectCounterpartyFromSecurity() {
+    const secEl = document.getElementById('security_label');
+    const cpEl  = document.getElementById('counterparty');
+    const cpStatus = document.getElementById('counterparty_status');
+    if (!secEl || !cpEl) return;
+
+    const selectedOpt = secEl.options[secEl.selectedIndex];
+    const issuer = (selectedOpt && selectedOpt.dataset.issuer) ? selectedOpt.dataset.issuer.trim() : '';
+
+    if (!issuer) return;
+
+    for (var i = 0; i < cpEl.options.length; i++) {
+        var opt = cpEl.options[i];
+        if (opt.value.trim().toLowerCase() === issuer.toLowerCase()) {
+            cpEl.value = opt.value;
+            if (typeof $ !== 'undefined' && $.fn.select2) {
+                $('#counterparty').val(opt.value).trigger('change.select2');
+            }
+            if (cpStatus) {
+                cpStatus.innerHTML = '<i class="bi bi-check-circle-fill text-success"></i>';
+                cpStatus.title = 'Auto-set from security issuer: ' + issuer;
+            }
+            return;
+        }
+    }
+    if (cpStatus) {
+        cpStatus.innerHTML = '<i class="bi bi-question-circle text-muted"></i>';
+        cpStatus.title = 'Issuer "' + issuer + '" not found in counterparty list';
+    }
+}
+
+// Auto-populate currency from selected security (readonly field)
+function autoPopulateCurrencyFromSecurity() {
+    const securityEl = document.getElementById('security_label');
+    const currencyHidden = document.getElementById('currency_code');
+    const currencyDisplay = document.getElementById('currency_code_display');
+    const selectedOption = securityEl.options[securityEl.selectedIndex];
+
+    if (selectedOption && selectedOption.dataset.currency) {
+        const currency = selectedOption.dataset.currency;
+        // Set both hidden field (for form submission) and display field
+        currencyHidden.value = currency;
+        currencyDisplay.value = currency;
+    } else {
+        // Clear currency if no security selected
+        currencyHidden.value = '';
+        currencyDisplay.value = '';
+    }
+
+    // Trigger FX rate lookup after security currency is set
+    fetchFxRate();
+}
+
+// Auto-populate currency from selected portfolio (readonly field)
+function autoPopulateCurrencyFromPortfolio() {
+    const portfolioEl = document.getElementById('portfolio_short_name');
+    const currencyHidden = document.getElementById('portfolio_currency');
+    const currencyDisplay = document.getElementById('portfolio_currency_display');
+    const selectedOption = portfolioEl.options[portfolioEl.selectedIndex];
+
+    if (selectedOption && selectedOption.dataset.currency) {
+        const currency = selectedOption.dataset.currency;
+        // Set both hidden field (for form submission) and display field
+        currencyHidden.value = currency;
+        currencyDisplay.value = currency;
+    } else {
+        // Clear currency if no portfolio selected
+        currencyHidden.value = '';
+        currencyDisplay.value = '';
+    }
+
+    // Trigger FX rate lookup after portfolio currency is set
+    fetchFxRate();
+}
+
+// Edit-mode variants: set currency display only, preserve saved trade FX rate
+function autoPopulateCurrencyFromSecurityNoFx() {
+    const securityEl = document.getElementById('security_label');
+    const currencyHidden = document.getElementById('currency_code');
+    const currencyDisplay = document.getElementById('currency_code_display');
+    if (!securityEl) return;
+    const selectedOption = securityEl.options[securityEl.selectedIndex];
+    if (selectedOption && selectedOption.dataset.currency) {
+        currencyHidden.value = selectedOption.dataset.currency;
+        currencyDisplay.value = selectedOption.dataset.currency;
+    }
+    // No fetchFxRate() — keep trade.open_fx_rate as stored
+    calculateTotal();
+}
+// Custodian is auto-set from the selected sub custodian's custodian_short_name
+// (cis_custodian_acc_details_lut) -- readonly, not a user-editable dropdown.
+function autoPopulateCustodianFromSubCustodian() {
+    const subCustodianEl = document.getElementById('udf_sub_custodian');
+    const custHidden = document.getElementById('custodian');
+    const custDisplay = document.getElementById('custodian_display');
+    if (!subCustodianEl || !custHidden || !custDisplay) return;
+    const selectedOption = subCustodianEl.options[subCustodianEl.selectedIndex];
+
+    if (selectedOption && selectedOption.dataset.custodian) {
+        custHidden.value = selectedOption.dataset.custodian;
+        custDisplay.value = selectedOption.dataset.custodian;
+    } else {
+        custHidden.value = '';
+        custDisplay.value = '';
+    }
+}
+
+// GL Cost Centre is auto-set from the selected portfolio's cost_centre_code
+// (cis_portfolio.cost_centre_code) -- readonly, not a user-editable dropdown.
+function autoPopulateCostCentreFromPortfolio() {
+    const portfolioEl = document.getElementById('portfolio_short_name');
+    const ccHidden = document.getElementById('gl_cost_centre');
+    const ccDisplay = document.getElementById('gl_cost_centre_display');
+    if (!portfolioEl || !ccHidden || !ccDisplay) return;
+    const selectedOption = portfolioEl.options[portfolioEl.selectedIndex];
+
+    if (selectedOption && selectedOption.dataset.cost_centre) {
+        ccHidden.value = selectedOption.dataset.cost_centre;
+        ccDisplay.value = selectedOption.dataset.cost_centre;
+    } else {
+        ccHidden.value = '';
+        ccDisplay.value = '';
+    }
+}
+
+function autoPopulateCurrencyFromPortfolioNoFx() {
+    const portfolioEl = document.getElementById('portfolio_short_name');
+    const currencyHidden = document.getElementById('portfolio_currency');
+    const currencyDisplay = document.getElementById('portfolio_currency_display');
+    if (!portfolioEl) return;
+    const selectedOption = portfolioEl.options[portfolioEl.selectedIndex];
+    if (selectedOption && selectedOption.dataset.currency) {
+        currencyHidden.value = selectedOption.dataset.currency;
+        currencyDisplay.value = selectedOption.dataset.currency;
+    }
+    // No fetchFxRate() — keep trade.open_fx_rate as stored
+    calculateTotal();
+}
+
+// Fetch FX rate from API based on security currency (FC) and portfolio currency (LC)
+function fetchFxRate() {
+    const securityCurrency = document.getElementById('currency_code').value;
+    const portfolioCurrency = document.getElementById('portfolio_currency').value;
+    const fxRateField = document.getElementById('open_fx_rate');
+    const fxRateInfo = document.getElementById('fx_rate_info');
+
+    // Both currencies must be set
+    if (!securityCurrency || !portfolioCurrency) {
+        if (fxRateInfo) {
+            fxRateInfo.textContent = 'Select portfolio and security';
+            fxRateInfo.className = 'text-muted small';
+        }
+        return;
+    }
+
+    // Same currency - rate is 1.0
+    if (securityCurrency === portfolioCurrency) {
+        fxRateField.value = '1.0000000';
+        if (fxRateInfo) {
+            fxRateInfo.textContent = 'Same currency (1.0)';
+            fxRateInfo.className = 'text-info small';
+        }
+        calculateTotal();
+        return;
+    }
+
+    // Show loading
+    if (fxRateInfo) {
+        fxRateInfo.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Fetching...';
+        fxRateInfo.className = 'text-muted small';
+    }
+
+    // Fetch FX rate from API
+    fetch(`/trade/api/fx-rate/?from=${encodeURIComponent(securityCurrency)}&to=${encodeURIComponent(portfolioCurrency)}`)
+        .then(response => response.json())
+        .then(data => {
+            console.log('FX Rate API response:', data);
+            if (data.rate && data.rate > 0) {
+                const rate7dp = parseFloat(data.rate).toFixed(7);
+                fxRateField.value = rate7dp;
+                if (fxRateInfo) {
+                    fxRateInfo.textContent = `${securityCurrency}-${portfolioCurrency}: ${rate7dp} (${data.date || 'latest'})`;
+                    fxRateInfo.className = 'text-success small';
+                }
+            } else {
+                // No rate found - default to 1.0
+                fxRateField.value = '1.0000000';
+                if (fxRateInfo) {
+                    fxRateInfo.textContent = `No rate found for ${securityCurrency}-${portfolioCurrency}, using 1.0`;
+                    fxRateInfo.className = 'text-warning small';
+                }
+            }
+            // Recalculate total with new FX rate
+            calculateTotal();
+        })
+        .catch(error => {
+            console.error('Error fetching FX rate:', error);
+            fxRateField.value = '1.0000000';
+            if (fxRateInfo) {
+                fxRateInfo.textContent = 'Error fetching rate, using 1.0';
+                fxRateInfo.className = 'text-danger small';
+            }
+            calculateTotal();
+        });
+}
+
+// Initialize Select2 on ALL dropdowns using project-level init
+$(document).ready(function() {
+    // List of ALL dropdown IDs to initialize with Select2
+    var allDropdownIds = [
+        // Basic Info Tab
+        'trade_type',
+        'trade_status',
+        // Portfolio, Security, Counterparty (with validation)
+        // Note: currency_code is now readonly text field, not a dropdown
+        {% if not is_edit %}
+        'portfolio_short_name',
+        'security_label',
+        {% endif %}
+        'counterparty',
+        // GL & Broker Tab
+        'open_close_position',
+        'extension',
+        'brokers',
+        'gl_fund_type',
+        // gl_cost_centre is now a readonly auto-populated field, not a Select2 dropdown
+        'gl_account_code',
+        // custodian is now a readonly auto-populated field, not a Select2 dropdown
+        'udf_sub_custodian',
+        'selling_rule',
+        'amor_accr_method',
+        // UDF Tab
+        'udf_fund_type',
+        'udf_section_31_26',
+        'udf_uobn_uobn_hk',
+        'udf_income_exp_type',
+        'udf_revision_code'
+    ];
+
+    // Initialize all dropdowns using the global CISSelect2 utility
+    CISSelect2.initByIds(allDropdownIds);
+
+    // Two-line Select2 helpers (shortname + subtitle in open list, shortname only when closed)
+    function twoLineResult(item) {
+        if (!item.id) return item.text;
+        var el = item.element;
+        var sub = el ? ($(el).data('fullname') || '') : '';
+        if (!sub || sub === item.text) return $('<span><strong>' + item.text + '</strong></span>');
+        return $(
+            '<span style="line-height:1.3;">' +
+                '<strong style="display:block;">' + item.text + '</strong>' +
+                '<small class="s2-subtext">' + sub + '</small>' +
+            '</span>'
+        );
+    }
+    function shortNameSelection(item) {
+        return $('<span>' + (item.text || item.id || '') + '</span>');
+    }
+    // Reinit portfolio and security with two-line display.
+    // In edit mode these fields are disabled <select>s never handed to
+    // CISSelect2.initByIds (see the "not is_edit" guard above), so
+    // calling .select2('destroy') on them throws (no instance to destroy)
+    // and aborts the rest of this ready() handler before the select2:select
+    // bindings below get attached.
+    {% if not is_edit %}
+    $('#portfolio_short_name').select2('destroy').select2({
+        theme: 'bootstrap-5', placeholder: 'Select Portfolio', allowClear: true, width: '100%',
+        templateResult: twoLineResult, templateSelection: shortNameSelection,
+    });
+    $('#security_label').select2('destroy').select2({
+        theme: 'bootstrap-5', placeholder: 'Select Security', allowClear: true, width: '100%',
+        templateResult: twoLineResult, templateSelection: shortNameSelection,
+    });
+    {% endif %}
+    $('#counterparty').select2('destroy').select2({
+        theme: 'bootstrap-5', placeholder: 'Select Counterparty', allowClear: true, width: '100%',
+        templateResult: twoLineResult, templateSelection: shortNameSelection,
+    });
+
+    // Add Select2 change event for broker dropdown to trigger charge calculation
+    $('#brokers').on('select2:select', function(e) {
+        console.log('=== BROKER SELECT2 CHANGED ===');
+        console.log('Selected broker:', $(this).val());
+        calculateBrokerCharges();
+    });
+
+    // Also trigger on quantity/price change (using jQuery for consistency)
+    $('#quantity, #price').on('change input', function() {
+        console.log('Quantity/Price changed, recalculating charges...');
+        calculateBrokerCharges();
+    });
+
+    // Add Select2 change event for portfolio dropdown to trigger currency update
+    $('#portfolio_short_name').on('select2:select', function(e) {
+        console.log('=== PORTFOLIO SELECT2 CHANGED ===');
+        console.log('Selected portfolio:', $(this).val());
+        autoPopulateCurrencyFromPortfolio();
+        autoPopulateCostCentreFromPortfolio();
+    });
+
+    // Add Select2 change event for sub custodian dropdown to trigger custodian auto-fill
+    $('#udf_sub_custodian').on('select2:select', function(e) {
+        autoPopulateCustodianFromSubCustodian();
+    });
+
+    // Add Select2 change event for security dropdown to trigger currency and price update
+    $('#security_label').on('select2:select', function(e) {
+        console.log('=== SECURITY SELECT2 CHANGED ===');
+        console.log('Selected security:', $(this).val());
+
+        // Auto-populate currency from selected security
+        autoPopulateCurrencyFromSecurity();
+
+        // Auto-select counterparty from security issuer
+        autoSelectCounterpartyFromSecurity();
+
+        // Fetch and update price from API
+        const securityLabel = $(this).val();
+        const currencyEl = document.getElementById('currency_code');
+        const priceField = document.getElementById('price');
+        const securityInfo = document.getElementById('security_info');
+
+        if (securityLabel && currencyEl && currencyEl.value) {
+            console.log('Fetching equity price for security:', securityLabel, 'currency:', currencyEl.value);
+            fetch(`/trade/api/equity-price/?security=${encodeURIComponent(securityLabel)}&currency=${encodeURIComponent(currencyEl.value)}`)
+                .then(response => response.json())
+                .then(data => {
+                    console.log('Equity price API response:', data);
+                    if (data.found && data.price > 0) {
+                        priceField.value = parseFloat(data.price).toFixed(4);
+                        if (securityInfo) {
+                            securityInfo.textContent = `Price: ${data.price} (${data.price_date || 'latest'})`;
+                            securityInfo.className = 'text-success small';
+                        }
+                        // Recalculate gross amount and total
+                        calculateGrossAmount();
+                        calculateTotal();
+                        // Also recalculate broker charges if broker is selected
+                        calculateBrokerCharges();
+                    } else {
+                        if (securityInfo) {
+                            securityInfo.textContent = 'No equity price found for this security';
+                            securityInfo.className = 'text-warning small';
+                        }
+                    }
+                })
+                .catch(error => {
+                    console.log('Could not fetch equity price:', error);
+                });
+        }
+    });
+
+    // Add operation popup on form submit
+    $('#tradeForm').on('submit', function(e) {
+        // Check form validity first
+        if (!this.checkValidity()) {
+            e.preventDefault();
+            e.stopPropagation();
+            $(this).addClass('was-validated');
+            return false;
+        }
+
+        // Ensure broker charges are calculated before submission
+        var broker = $('#brokers').val();
+        var quantity = parseFloat($('#quantity').val()) || 0;
+        var price = parseFloat($('#price').val()) || 0;
+
+        console.log('=== FORM SUBMIT ===');
+        console.log('Broker:', broker);
+        console.log('Quantity:', quantity);
+        console.log('Price:', price);
+
+        // Debug: Show all charge hidden field values
+        console.log('=== HIDDEN FIELD VALUES ===');
+        console.log('calculated_commission:', $('#calculated_commission').val());
+        console.log('calculated_clearing_fee:', $('#calculated_clearing_fee').val());
+        console.log('calculated_trading_fee:', $('#calculated_trading_fee').val());
+        console.log('calculated_gst:', $('#calculated_gst').val());
+        console.log('calculated_other_fees:', $('#calculated_other_fees').val());
+        console.log('total_calculated_charges:', $('#total_calculated_charges').val());
+        console.log('charges_auto_calculated:', $('#charges_auto_calculated').val());
+        console.log('charge_fee_type:', $('#charge_fee_type').val());
+
+        // If broker is selected and we have quantity/price, verify charges are set
+        if (broker && quantity > 0 && price > 0) {
+            var totalCharges = parseFloat($('#total_calculated_charges').val()) || 0;
+            var chargesAutoCalc = $('#charges_auto_calculated').val();
+
+            console.log('Form submit check - Broker:', broker, 'Total Charges:', totalCharges, 'Auto-calc:', chargesAutoCalc);
+
+            // If charges haven't been calculated yet (still 0 and not auto-calculated), calculate them now
+            if (totalCharges === 0 && chargesAutoCalc !== 'true') {
+                e.preventDefault();
+                console.log('Charges not calculated - calculating now before submit...');
+
+                // Calculate charges synchronously using fetch with async/await pattern
+                calculateBrokerChargesSync(function() {
+                    // After charges are calculated, submit the form
+                    console.log('Charges calculated, submitting form...');
+                    var operation = '{% if is_edit %}update{% else %}create{% endif %}';
+                    var dealNumEl = document.getElementById('deal_number');
+                    var dealNum = (dealNumEl && dealNumEl.value) ? dealNumEl.value : '{{ trade.deal_number|default:"" }}';
+                    var entity = dealNum ? ('Trade ' + dealNum) : 'Trade';
+                    submitWithPopup(operation, entity, document.getElementById('tradeForm'));
+                });
+                return false;
+            }
+        }
+
+        // Show the operation popup
+        var operation = '{% if is_edit %}update{% else %}create{% endif %}';
+        var dealNumEl = document.getElementById('deal_number');
+        var dealNum = (dealNumEl && dealNumEl.value) ? dealNumEl.value : '{{ trade.deal_number|default:"" }}';
+        var entity = dealNum ? ('Trade ' + dealNum) : 'Trade';
+        submitWithPopup(operation, entity, this);
+
+        // Prevent default - let submitWithPopup handle submission
+        e.preventDefault();
+        return false;
+    });
+});
+
+// Synchronous version of calculateBrokerCharges with callback
+function calculateBrokerChargesSync(callback) {
+    const brokersField = document.getElementById('brokers');
+    const quantityField = document.getElementById('quantity');
+    const priceField = document.getElementById('price');
+    const tradeTypeField = document.getElementById('trade_type');
+    const exchangeField = document.getElementById('charge_exchange');
+    const currencyField = document.getElementById('currency_code');
+
+    if (!brokersField || !quantityField || !priceField) {
+        console.log('Required form fields not found');
+        if (callback) callback();
+        return;
+    }
+
+    const broker = brokersField.value;
+    const quantity = parseFloat(quantityField.value) || 0;
+    const price = parseFloat(priceField.value) || 0;
+    const tradeType = tradeTypeField ? tradeTypeField.value : 'BUY';
+    const exchange = exchangeField ? exchangeField.value : '';
+    const currency = currencyField ? currencyField.value : '';
+
+    if (!broker || quantity <= 0 || price <= 0) {
+        if (callback) callback();
+        return;
+    }
+
+    let url = `/trade/api/calculate-charges/?broker=${encodeURIComponent(broker)}&quantity=${quantity}&price=${price}&trade_type=${tradeType}`;
+    if (exchange) {
+        url += `&exchange=${encodeURIComponent(exchange)}`;
+    }
+    if (currency) {
+        url += `&currency=${encodeURIComponent(currency)}`;
+    }
+
+    console.log('Sync fetch for charges:', url);
+
+    fetch(url)
+        .then(response => response.json())
+        .then(data => {
+            console.log('Sync charge calculation result:', data);
+
+            if (data.error || !data.charges || data.charges.length === 0) {
+                console.log('No charges found or error');
+                if (callback) callback();
+                return;
+            }
+
+            // Update hidden fields with calculated values
+            let calculatedCommission = 0;
+            let calculatedClearingFee = 0;
+            let calculatedTradingFee = 0;
+            let calculatedGst = 0;
+            let calculatedOtherFees = 0;
+
+            data.charges.forEach(function(charge) {
+                const feeTypeLower = charge.fee_type.toLowerCase();
+                if (feeTypeLower.includes('brokerage')) {
+                    calculatedCommission += charge.calculated_fee;
+                } else if (feeTypeLower.includes('clearing')) {
+                    calculatedClearingFee += charge.calculated_fee;
+                } else if (feeTypeLower.includes('trading')) {
+                    calculatedTradingFee += charge.calculated_fee;
+                } else if (feeTypeLower.includes('gst')) {
+                    calculatedGst += charge.calculated_fee;
+                } else {
+                    calculatedOtherFees += charge.calculated_fee;
+                }
+            });
+
+            // Set hidden field values
+            document.getElementById('calculated_commission').value = calculatedCommission.toFixed(2);
+            document.getElementById('calculated_clearing_fee').value = calculatedClearingFee.toFixed(2);
+            document.getElementById('calculated_trading_fee').value = calculatedTradingFee.toFixed(2);
+            document.getElementById('calculated_gst').value = calculatedGst.toFixed(2);
+            document.getElementById('calculated_other_fees').value = calculatedOtherFees.toFixed(2);
+            document.getElementById('total_calculated_charges').value = data.total_charges.toFixed(2);
+            document.getElementById('charges_auto_calculated').value = 'true';
+
+            // Set charge metadata
+            if (data.charges.length > 0) {
+                const firstCharge = data.charges[0];
+                document.getElementById('charge_fee_type').value = firstCharge.fee_type;
+                document.getElementById('hidden_charge_exchange').value = firstCharge.exchange || '';
+                document.getElementById('charge_country').value = firstCharge.country_of_exchange || '';
+                document.getElementById('charge_fee_rule').value = firstCharge.fee_rule;
+                document.getElementById('charge_fee_value').value = firstCharge.fee_value;
+            }
+
+            // Also update commission field
+            const commissionField = document.getElementById('commission');
+            if (commissionField) {
+                commissionField.value = data.total_charges.toFixed(7);
+            }
+
+            console.log('Hidden fields updated - Total charges:', data.total_charges);
+
+            if (callback) callback();
+        })
+        .catch(error => {
+            console.error('Error in sync charge calculation:', error);
+            if (callback) callback();
+        });
+}
+</script>
+{% endblock %}

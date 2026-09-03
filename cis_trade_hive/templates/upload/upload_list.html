@@ -1,0 +1,290 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}File Uploads - CisTrade{% endblock %}
+
+{% block breadcrumb %}
+    <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
+    <li class="breadcrumb-item">Configuration</li>
+    <li class="breadcrumb-item active">File Uploads</li>
+{% endblock %}
+
+{% block content %}
+<div class="upload-list-container">
+    <!-- Page Header -->
+    <div class="content-header d-flex justify-content-between align-items-center">
+        <div>
+            <h1 class="content-title">
+                <i class="bi bi-cloud-upload text-primary"></i> File Uploads
+            </h1>
+            <p class="content-subtitle">Upload and ingest files into Hive external tables</p>
+        </div>
+        <a href="{% url 'upload:create' %}" class="btn btn-primary">
+            <i class="bi bi-plus-circle"></i> Upload File
+        </a>
+    </div>
+
+    <!-- Statistics Cards - White background with colored accents -->
+    <div class="row mb-4">
+        <div class="col-md-3">
+            <div class="card border-0 shadow-sm" style="background: #ffffff;">
+                <div class="card-body py-4">
+                    <div class="d-flex align-items-center">
+                        <div class="flex-shrink-0 me-3">
+                            <div class="d-flex align-items-center justify-content-center rounded"
+                                 style="width: 48px; height: 48px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
+                                <i class="bi bi-cloud-upload text-white fs-5"></i>
+                            </div>
+                        </div>
+                        <div class="flex-grow-1">
+                            <h3 class="fw-bold mb-0 text-dark">{{ stats.total_uploads }}</h3>
+                            <small class="text-muted">Total Uploads</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card border-0 shadow-sm" style="background: #ffffff;">
+                <div class="card-body py-4">
+                    <div class="d-flex align-items-center">
+                        <div class="flex-shrink-0 me-3">
+                            <div class="d-flex align-items-center justify-content-center rounded"
+                                 style="width: 48px; height: 48px; background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);">
+                                <i class="bi bi-hourglass-split text-white fs-5"></i>
+                            </div>
+                        </div>
+                        <div class="flex-grow-1">
+                            <h3 class="fw-bold mb-0 text-dark">{{ stats.pending }}</h3>
+                            <small class="text-muted">Pending</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card border-0 shadow-sm" style="background: #ffffff;">
+                <div class="card-body py-4">
+                    <div class="d-flex align-items-center">
+                        <div class="flex-shrink-0 me-3">
+                            <div class="d-flex align-items-center justify-content-center rounded"
+                                 style="width: 48px; height: 48px; background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);">
+                                <i class="bi bi-check-circle text-white fs-5"></i>
+                            </div>
+                        </div>
+                        <div class="flex-grow-1">
+                            <h3 class="fw-bold mb-0 text-dark">{{ stats.completed }}</h3>
+                            <small class="text-muted">Completed</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card border-0 shadow-sm" style="background: #ffffff;">
+                <div class="card-body py-4">
+                    <div class="d-flex align-items-center">
+                        <div class="flex-shrink-0 me-3">
+                            <div class="d-flex align-items-center justify-content-center rounded"
+                                 style="width: 48px; height: 48px; background: linear-gradient(135deg, #eb3349 0%, #f45c43 100%);">
+                                <i class="bi bi-x-circle text-white fs-5"></i>
+                            </div>
+                        </div>
+                        <div class="flex-grow-1">
+                            <h3 class="fw-bold mb-0 text-dark">{{ stats.failed }}</h3>
+                            <small class="text-muted">Failed</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Filters -->
+    <div class="card mb-4">
+        <div class="card-body">
+            <form method="get" class="row g-3">
+                <div class="col-md-4">
+                    <input type="text" class="form-control" name="search"
+                           placeholder="Search file name..." value="{{ search_query }}">
+                </div>
+                <div class="col-md-3">
+                    <select class="form-select" name="status">
+                        <option value="">All Statuses</option>
+                        {% for value, label in status_choices %}
+                        <option value="{{ value }}" {% if status_filter == value %}selected{% endif %}>
+                            {{ label }}
+                        </option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <select class="form-select" name="file_type">
+                        <option value="">All File Types</option>
+                        {% for value, label in file_type_choices %}
+                        <option value="{{ value }}" {% if file_type_filter == value %}selected{% endif %}>
+                            {{ label }}
+                        </option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <button type="submit" class="btn btn-outline-primary w-100">
+                        <i class="bi bi-search"></i> Filter
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Uploads Table -->
+    <div class="card">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <h5 class="card-title mb-0">
+                <i class="bi bi-table"></i> Uploads
+                <span class="badge bg-secondary ms-2">{{ total_count }}</span>
+            </h5>
+        </div>
+        <div class="card-body p-0">
+            {% if uploads %}
+            <div class="table-responsive">
+                <table class="table table-hover sortable-table mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th class="sortable" data-sort-type="text">File Name</th>
+                            <th class="sortable" data-sort-type="text">Type</th>
+                            <th class="sortable" data-sort-type="number">Size</th>
+                            <th class="sortable" data-sort-type="number">Rows</th>
+                            <th class="sortable" data-sort-type="text">Status</th>
+                            <th class="sortable" data-sort-type="text">Target Table</th>
+                            <th class="sortable" data-sort-type="date">Created</th>
+                            <th class="sticky-action-column">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for upload in uploads %}
+                        <tr>
+                            <td>
+                                <a href="{% url 'upload:detail' upload.upload_id %}" class="text-decoration-none">
+                                    <i class="bi bi-file-earmark me-1"></i>
+                                    {{ upload.file_name|truncatechars:40 }}
+                                </a>
+                            </td>
+                            <td>
+                                <span class="badge bg-info">{{ upload.file_type|upper }}</span>
+                            </td>
+                            <td>
+                                {% widthratio upload.file_size 1024 1 as size_kb %}
+                                {% if upload.file_size > 1048576 %}
+                                    {% widthratio upload.file_size 1048576 1 %} MB
+                                {% elif upload.file_size > 1024 %}
+                                    {{ size_kb }} KB
+                                {% else %}
+                                    {{ upload.file_size }} B
+                                {% endif %}
+                            </td>
+                            <td>{{ upload.row_count|default:"-" }}</td>
+                            <td>
+                                {% if upload.status == 'PENDING' %}
+                                    <span class="badge bg-warning text-dark">Pending</span>
+                                {% elif upload.status == 'VALIDATING' %}
+                                    <span class="badge bg-info text-dark">Validating</span>
+                                {% elif upload.status == 'VALIDATED' %}
+                                    <span class="badge bg-primary">Validated</span>
+                                {% elif upload.status == 'INGESTING' %}
+                                    <span class="badge bg-info text-dark">
+                                        <span class="spinner-border spinner-border-sm me-1"></span>Ingesting
+                                    </span>
+                                {% elif upload.status == 'COMPLETED' %}
+                                    <span class="badge bg-success">Completed</span>
+                                {% elif upload.status == 'INGESTED' %}
+                                    <span class="badge bg-teal text-white" style="background-color:#0d9488;">Ingested — ETL Pending</span>
+                                {% elif upload.status == 'ETL_RUNNING' %}
+                                    <span class="badge bg-primary">
+                                        <span class="spinner-border spinner-border-sm me-1"></span>ETL Running
+                                    </span>
+                                {% elif upload.status == 'ETL_COMPLETE' %}
+                                    <span class="badge bg-success">ETL Complete</span>
+                                {% elif upload.status == 'FAILED' or upload.status == 'VALIDATION_FAILED' %}
+                                    <span class="badge bg-danger">Failed</span>
+                                {% elif upload.status == 'CANCELLED' %}
+                                    <span class="badge bg-secondary">Cancelled</span>
+                                {% else %}
+                                    <span class="badge bg-secondary">{{ upload.status }}</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if upload.target_table_name %}
+                                    <code class="small">{{ upload.target_table_name|truncatechars:30 }}</code>
+                                {% else %}
+                                    <span class="text-muted">-</span>
+                                {% endif %}
+                            </td>
+                            <td>{{ upload.created_at|default:"-" }}</td>
+                            <td class="sticky-action-column">
+                                <div class="btn-group btn-group-sm">
+                                    <a href="{% url 'upload:detail' upload.upload_id %}"
+                                       class="btn btn-outline-primary" title="View Details">
+                                        <i class="bi bi-eye"></i>
+                                    </a>
+                                    {% if upload.status == 'VALIDATED' %}
+                                    <a href="{% url 'upload:preview' upload.upload_id %}"
+                                       class="btn btn-outline-success" title="Preview & Ingest">
+                                        <i class="bi bi-play-circle"></i>
+                                    </a>
+                                    {% endif %}
+                                </div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="text-center py-5">
+                <i class="bi bi-cloud-upload" style="font-size: 4rem; opacity: 0.3;"></i>
+                <p class="mt-3 mb-0 text-muted">No uploads found</p>
+                <a href="{% url 'upload:create' %}" class="btn btn-primary mt-3">
+                    <i class="bi bi-plus-circle"></i> Upload Your First File
+                </a>
+            </div>
+            {% endif %}
+        </div>
+
+        {% if page_obj.has_other_pages %}
+        <div class="card-footer">
+            <nav aria-label="Page navigation">
+                <ul class="pagination justify-content-center mb-0">
+                    {% if page_obj.has_previous %}
+                    <li class="page-item">
+                        <a class="page-link" href="?page={{ page_obj.previous_page_number }}&search={{ search_query }}&status={{ status_filter }}&file_type={{ file_type_filter }}">
+                            Previous
+                        </a>
+                    </li>
+                    {% endif %}
+
+                    <li class="page-item disabled">
+                        <span class="page-link">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
+                    </li>
+
+                    {% if page_obj.has_next %}
+                    <li class="page-item">
+                        <a class="page-link" href="?page={{ page_obj.next_page_number }}&search={{ search_query }}&status={{ status_filter }}&file_type={{ file_type_filter }}">
+                            Next
+                        </a>
+                    </li>
+                    {% endif %}
+                </ul>
+            </nav>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+{% if has_ingesting %}
+<script>
+/* Auto-refresh while any upload is in INGESTING state */
+setTimeout(function(){ location.reload(); }, 6000);
+</script>
+{% endif %}
+{% endblock %}

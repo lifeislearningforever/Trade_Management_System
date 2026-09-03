@@ -1,0 +1,225 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block breadcrumb %}
+    <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
+    <li class="breadcrumb-item active">Search Results</li>
+{% endblock %}
+
+{% block content %}
+<div class="content-header">
+    <div class="d-flex justify-content-between align-items-center">
+        <div>
+            <h1 class="content-title">
+                <i class="bi bi-search"></i>
+                {% if query %}
+                    Search Results for "{{ query }}"
+                {% else %}
+                    Global Search
+                {% endif %}
+            </h1>
+            {% if query %}
+                <p class="text-muted">Found {{ total_results }} result{{ total_results|pluralize }} across all modules</p>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<div class="card shadow-sm">
+    <div class="card-body">
+        <!-- Search Form -->
+        <form method="get" action="{% url 'global_search' %}" class="mb-4">
+            <div class="input-group input-group-lg">
+                <span class="input-group-text">
+                    <i class="bi bi-search"></i>
+                </span>
+                <input type="text"
+                       class="form-control"
+                       name="q"
+                       value="{{ query }}"
+                       placeholder="Search portfolios, currencies, FX rates, UDFs..."
+                       autofocus>
+                <button class="btn btn-primary" type="submit">
+                    Search
+                </button>
+            </div>
+            <small class="text-muted">Search across Portfolios, FX Rates, UDFs, Currencies, Countries, and Counterparties</small>
+        </form>
+
+        {% if query %}
+            {% if total_results == 0 %}
+                <!-- No Results -->
+                <div class="alert alert-info">
+                    <i class="bi bi-info-circle"></i>
+                    No results found for "<strong>{{ query }}</strong>". Try different keywords or check spelling.
+                </div>
+            {% else %}
+                <!-- Portfolios -->
+                {% if results.portfolios %}
+                    <div class="search-section mb-4">
+                        <h5 class="mb-3">
+                            <i class="bi bi-briefcase text-primary"></i>
+                            Portfolios <span class="badge bg-primary">{{ results.portfolios|length }}</span>
+                        </h5>
+                        <div class="list-group">
+                            {% for portfolio in results.portfolios %}
+                                <a href="{% url 'portfolio:detail' portfolio.name %}" class="list-group-item list-group-item-action">
+                                    <div class="d-flex justify-content-between align-items-center">
+                                        <div>
+                                            <h6 class="mb-1">{{ portfolio.name }}</h6>
+                                            <small class="text-muted">
+                                                {% if portfolio.description %}{{ portfolio.description }} | {% endif %}
+                                                Currency: {{ portfolio.currency }} |
+                                                Status: <span class="badge badge-sm bg-{{ portfolio.status|lower }}">{{ portfolio.status }}</span>
+                                            </small>
+                                        </div>
+                                        <i class="bi bi-arrow-right"></i>
+                                    </div>
+                                </a>
+                            {% endfor %}
+                        </div>
+                    </div>
+                {% endif %}
+
+                <!-- FX Rates -->
+                {% if results.fx_rates %}
+                    <div class="search-section mb-4">
+                        <h5 class="mb-3">
+                            <i class="bi bi-currency-exchange text-info"></i>
+                            FX Rates <span class="badge bg-info">{{ results.fx_rates|length }}</span>
+                        </h5>
+                        <div class="list-group">
+                            {% for fx_rate in results.fx_rates %}
+                                <a href="{% url 'market_data:fx_rate_detail' fx_rate.currency_pair %}" class="list-group-item list-group-item-action">
+                                    <div class="d-flex justify-content-between align-items-center">
+                                        <div>
+                                            <h6 class="mb-1">{{ fx_rate.currency_pair }}</h6>
+                                            <small class="text-muted">
+                                                Rate: {{ fx_rate.rate|floatformat:6 }} |
+                                                Trade Date: {{ fx_rate.trade_date }} |
+                                                Source: <span class="badge badge-sm bg-info">{{ fx_rate.source }}</span>
+                                            </small>
+                                        </div>
+                                        <i class="bi bi-arrow-right"></i>
+                                    </div>
+                                </a>
+                            {% endfor %}
+                        </div>
+                    </div>
+                {% endif %}
+
+                <!-- UDFs -->
+                {% if results.udfs %}
+                    <div class="search-section mb-4">
+                        <h5 class="mb-3">
+                            <i class="bi bi-tags text-success"></i>
+                            User-Defined Fields <span class="badge bg-success">{{ results.udfs|length }}</span>
+                        </h5>
+                        <div class="list-group">
+                            {% for udf in results.udfs %}
+                                <a href="{% url 'udf:detail' udf.udf_id %}" class="list-group-item list-group-item-action">
+                                    <div class="d-flex justify-content-between align-items-center">
+                                        <div>
+                                            <h6 class="mb-1">{{ udf.field_code }} - {{ udf.field_name }}</h6>
+                                            <small class="text-muted">
+                                                Type: {{ udf.data_type }} |
+                                                Entity: {{ udf.entity_type }} |
+                                                Status: <span class="badge badge-sm bg-{{ udf.is_active|yesno:'active,inactive' }}">{{ udf.is_active|yesno:'Active,Inactive' }}</span>
+                                            </small>
+                                        </div>
+                                        <i class="bi bi-arrow-right"></i>
+                                    </div>
+                                </a>
+                            {% endfor %}
+                        </div>
+                    </div>
+                {% endif %}
+
+                <!-- Currencies -->
+                {% if results.currencies %}
+                    <div class="search-section mb-4">
+                        <h5 class="mb-3">
+                            <i class="bi bi-currency-dollar text-warning"></i>
+                            Currencies <span class="badge bg-warning">{{ results.currencies|length }}</span>
+                        </h5>
+                        <div class="list-group">
+                            {% for currency in results.currencies %}
+                                <a href="{% url 'reference_data:currency_list' %}?search={{ currency.code }}" class="list-group-item list-group-item-action">
+                                    <div class="d-flex justify-content-between align-items-center">
+                                        <div>
+                                            <h6 class="mb-1">{{ currency.code }} - {{ currency.name }}</h6>
+                                            <small class="text-muted">
+                                                {% if currency.symbol %}Symbol: {{ currency.symbol }} | {% endif %}
+                                                Decimal Places: {{ currency.decimal_places }}
+                                            </small>
+                                        </div>
+                                        <i class="bi bi-arrow-right"></i>
+                                    </div>
+                                </a>
+                            {% endfor %}
+                        </div>
+                    </div>
+                {% endif %}
+
+                <!-- Countries -->
+                {% if results.countries %}
+                    <div class="search-section mb-4">
+                        <h5 class="mb-3">
+                            <i class="bi bi-globe text-info"></i>
+                            Countries <span class="badge bg-info">{{ results.countries|length }}</span>
+                        </h5>
+                        <div class="list-group">
+                            {% for country in results.countries %}
+                                <a href="{% url 'reference_data:country_list' %}?search={{ country.code }}" class="list-group-item list-group-item-action">
+                                    <div class="d-flex justify-content-between align-items-center">
+                                        <div>
+                                            <h6 class="mb-1">{{ country.code }} - {{ country.name }}</h6>
+                                            <small class="text-muted">
+                                                {% if country.region %}Region: {{ country.region }}{% endif %}
+                                            </small>
+                                        </div>
+                                        <i class="bi bi-arrow-right"></i>
+                                    </div>
+                                </a>
+                            {% endfor %}
+                        </div>
+                    </div>
+                {% endif %}
+
+                <!-- Counterparties -->
+                {% if results.counterparties %}
+                    <div class="search-section mb-4">
+                        <h5 class="mb-3">
+                            <i class="bi bi-building text-danger"></i>
+                            Counterparties <span class="badge bg-danger">{{ results.counterparties|length }}</span>
+                        </h5>
+                        <div class="list-group">
+                            {% for counterparty in results.counterparties %}
+                                <a href="{% url 'reference_data:counterparty_list' %}?search={{ counterparty.code }}" class="list-group-item list-group-item-action">
+                                    <div class="d-flex justify-content-between align-items-center">
+                                        <div>
+                                            <h6 class="mb-1">{{ counterparty.code }} - {{ counterparty.name }}</h6>
+                                            <small class="text-muted">
+                                                {% if counterparty.country %}Country: {{ counterparty.country }}{% endif %}
+                                                {% if counterparty.type %} | Type: {{ counterparty.type }}{% endif %}
+                                            </small>
+                                        </div>
+                                        <i class="bi bi-arrow-right"></i>
+                                    </div>
+                                </a>
+                            {% endfor %}
+                        </div>
+                    </div>
+                {% endif %}
+            {% endif %}
+        {% else %}
+            <!-- No Query -->
+            <div class="text-center py-5">
+                <i class="bi bi-search" style="font-size: 4rem; color: #ccc;"></i>
+                <h4 class="mt-3 text-muted">Start searching</h4>
+                <p class="text-muted">Enter a search term to find portfolios, FX rates, currencies, UDFs, and more.</p>
+            </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

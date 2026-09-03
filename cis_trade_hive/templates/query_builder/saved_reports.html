@@ -1,0 +1,74 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Saved Reports - CisTrade{% endblock %}
+
+{% block breadcrumb %}
+<li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
+<li class="breadcrumb-item"><a href="{% url 'query_builder:builder' %}">Query Builder</a></li>
+<li class="breadcrumb-item active">Saved Reports</li>
+{% endblock %}
+
+{% block content %}
+<div class="content-header d-flex justify-content-between align-items-center mb-3">
+  <div>
+    <h1 class="content-title"><i class="bi bi-bookmark-star text-primary"></i> Saved Reports</h1>
+    <p class="content-subtitle mb-0">Run saved report templates</p>
+  </div>
+  <a href="{% url 'query_builder:builder' %}" class="btn btn-primary btn-sm"><i class="bi bi-plus"></i> New Query</a>
+</div>
+
+{% if templates %}
+<div class="row row-cols-1 row-cols-md-2 row-cols-xl-3 g-3">
+  {% for tpl in templates %}
+  <div class="col">
+    <div class="card h-100">
+      <div class="card-body">
+        <div class="d-flex justify-content-between align-items-start mb-2">
+          <h6 class="card-title mb-0">{{ tpl.template_name }}</h6>
+          <span class="badge bg-secondary">{{ tpl.category }}</span>
+        </div>
+        {% if tpl.description %}<p class="card-text text-muted small">{{ tpl.description }}</p>{% endif %}
+        <div class="d-flex gap-1 mt-2">
+          {% if tpl.is_public %}<span class="badge bg-info text-dark"><i class="bi bi-globe"></i> Public</span>{% endif %}
+          <span class="badge bg-light text-dark">{{ tpl.created_by }}</span>
+        </div>
+      </div>
+      <div class="card-footer d-flex justify-content-between align-items-center">
+        <small class="text-muted">{{ tpl.updated_at|default:tpl.created_at }}</small>
+        <div class="d-flex gap-2">
+          <a href="{% url 'query_builder:builder' %}?template={{ tpl.template_id }}" class="btn btn-primary btn-sm">
+            <i class="bi bi-play-fill"></i> Run
+          </a>
+          {% if is_admin %}
+          <button class="btn btn-outline-danger btn-sm"
+                  onclick="deleteTemplate({{ tpl.template_id }}, '{{ tpl.template_name|escapejs }}')">
+            <i class="bi bi-trash"></i>
+          </button>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div class="text-center py-5 text-muted">
+  <i class="bi bi-bookmark" style="font-size:3rem; opacity:.3;"></i>
+  <p class="mt-3">No saved reports yet. <a href="{% url 'query_builder:builder' %}">Build a query</a> and save it as a template.</p>
+</div>
+{% endif %}
+
+<script>
+function deleteTemplate(id, name) {
+    if (!confirm(`Delete template "${name}"?`)) return;
+    fetch(`/query-builder/saved/${id}/delete/`, {
+        method: 'POST',
+        headers: {'X-CSRFToken': '{{ csrf_token }}', 'Content-Type': 'application/json'}
+    }).then(r => r.json()).then(d => {
+        if (d.success) location.reload();
+        else alert('Error deleting template');
+    });
+}
+</script>
+{% endblock %}

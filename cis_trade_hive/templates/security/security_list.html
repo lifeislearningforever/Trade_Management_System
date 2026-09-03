@@ -1,0 +1,359 @@
+{% extends 'base.html' %}
+{% load static core_filters %}
+
+{% block title %}{% if is_pending_view %}Pending Validation{% else %}Security Master Data{% endif %} - CisTrade{% endblock %}
+
+{% block breadcrumb %}
+    <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
+    <li class="breadcrumb-item">Reference Data</li>
+    {% if is_pending_view %}
+    <li class="breadcrumb-item"><a href="{% url 'security:list' %}">Securities</a></li>
+    <li class="breadcrumb-item active">Pending Validation</li>
+    {% else %}
+    <li class="breadcrumb-item active">Securities</li>
+    {% endif %}
+{% endblock %}
+
+{% block content %}
+<div class="security-list-container" style="max-width: 100%; overflow-x: hidden;">
+    <!-- Page Header -->
+    <div class="content-header">
+        <h1 class="content-title">
+            {% if is_pending_view %}
+            <i class="bi bi-clock-history text-warning"></i> Securities Pending Validation
+            {% else %}
+            <i class="bi bi-shield-check text-primary"></i> Security Master Data
+            {% endif %}
+        </h1>
+        <p class="content-subtitle">
+            {% if is_pending_view %}
+            Review and validate securities created by Makers (Four-Eyes principle)
+            {% else %}
+            Manage securities with Maker-Checker workflow
+            {% endif %}
+        </p>
+    </div>
+
+    <!-- Action Buttons -->
+    <div class="mb-4">
+        {% if is_pending_view %}
+        <a href="{% url 'security:list' %}" class="btn btn-outline-secondary">
+            <i class="bi bi-arrow-left"></i> Back to All Securities
+        </a>
+        {% else %}
+        {% if can_create %}
+        <a href="{% url 'security:create' %}" class="btn btn-primary">
+            <i class="bi bi-plus-circle"></i> Create New Security
+        </a>
+        {% endif %}
+        {% if can_approve %}
+        <a href="{% url 'security:pending_approvals' %}" class="btn btn-warning">
+            <i class="bi bi-clock-history"></i> Pending Validation
+            {% if pending_count %}
+                <span class="badge bg-danger">{{ pending_count }}</span>
+            {% endif %}
+        </a>
+        {% endif %}
+        {% endif %}
+        <a href="{% url 'security:dashboard' %}" class="btn btn-info">
+            <i class="bi bi-graph-up"></i> Dashboard
+        </a>
+        {% if can_download and not is_pending_view %}
+        <a href="{% url 'security:list' %}?export=csv&sort_by={{ sort_by }}&sort_order={{ sort_order }}{% if search %}&search={{ search }}{% endif %}{% if status %}&status={{ status }}{% endif %}{% if security_type %}&security_type={{ security_type }}{% endif %}{% if src_system %}&src_system={{ src_system }}{% endif %}" class="btn btn-outline-success">
+            <i class="bi bi-download"></i> Export CSV
+        </a>
+        {% endif %}
+    </div>
+
+    <!-- Search & Filter Card (hide on pending view) -->
+    {% if not is_pending_view %}
+    <div class="card mb-4">
+        <div class="card-header">
+            <h5 class="card-title mb-0">
+                <i class="bi bi-funnel"></i> Search & Filter
+            </h5>
+        </div>
+        <div class="card-body">
+            <form method="get" action="{% url 'security:list' %}" class="row g-3">
+                <div class="col-md-4">
+                    <label class="form-label">Search</label>
+                    <div class="input-group">
+                        <span class="input-group-text"><i class="bi bi-search"></i></span>
+                        <input type="text" class="form-control" name="search" value="{{ search }}"
+                               placeholder="Name, description, ISIN, ticker, issuer...">
+                    </div>
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label">Status</label>
+                    <select class="form-select" name="status">
+                        <option value="">All Statuses</option>
+                        <option value="INITIAL" {% if status == 'INITIAL' %}selected{% endif %}>Initial</option>
+                        <option value="MODIFIED" {% if status == 'MODIFIED' %}selected{% endif %}>Modified</option>
+                        <option value="VALIDATED" {% if status == 'VALIDATED' %}selected{% endif %}>Validated</option>
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label">Source System</label>
+                    <select class="form-select" name="src_system">
+                        <option value="">All Sources</option>
+                        <option value="CIS" {% if src_system == 'CIS' %}selected{% endif %}>CIS</option>
+                        <option value="GMP" {% if src_system == 'GMP' %}selected{% endif %}>GMP</option>
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label">Security Type</label>
+                    <input type="text" class="form-control" name="security_type" value="{{ security_type }}"
+                           placeholder="e.g., ETF, Common Stock">
+                </div>
+                <div class="col-md-2 d-flex align-items-end gap-2">
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-search"></i> Search
+                    </button>
+                    <a href="{% url 'security:list' %}" class="btn btn-outline-secondary">
+                        <i class="bi bi-x-circle"></i> Clear
+                    </a>
+                </div>
+            </form>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Querystring fragment helpers for sort + filters -->
+    {% with filter_qs=""%}{% endwith %}
+
+    <!-- Securities Table -->
+    <div class="card">
+        <div class="card-header">
+            <h5 class="card-title mb-0">
+                {% if is_pending_view %}
+                Pending Securities
+                <span class="badge badge-warning ms-2">{{ total_count }} securit{{ total_count|pluralize:"y,ies" }} awaiting validation</span>
+                {% else %}
+                Security List
+                <span class="badge badge-primary ms-2">{{ total_count }} securit{{ total_count|pluralize:"y,ies" }}</span>
+                {% endif %}
+            </h5>
+        </div>
+        <div class="card-body p-0">
+            {% if page_obj %}
+                <div class="table-responsive" style="display: block; width: 100%; max-height: 600px; overflow-x: auto; overflow-y: auto;">
+                    <table class="table table-hover table-sm mb-0" style="width: max-content;">
+                        <thead class="table-light" style="position: sticky; top: 0; z-index: 10; background-color: #f8f9fa;">
+                            <tr>
+                                {% comment %}Macro: each sortable header is a link that toggles asc/desc and preserves all filters{% endcomment %}
+                                <th style="min-width: 80px;">
+                                    <a href="?sort_by=src_system&sort_order={% if sort_by == 'src_system' and sort_order == 'asc' %}desc{% else %}asc{% endif %}{% if search %}&search={{ search }}{% endif %}{% if status %}&status={{ status }}{% endif %}{% if security_type %}&security_type={{ security_type }}{% endif %}{% if src_system %}&src_system={{ src_system }}{% endif %}" class="text-dark text-decoration-none">
+                                        Source {% if sort_by == 'src_system' %}{% if sort_order == 'asc' %}<i class="bi bi-sort-up"></i>{% else %}<i class="bi bi-sort-down"></i>{% endif %}{% else %}<i class="bi bi-arrow-down-up text-muted" style="opacity:.4;"></i>{% endif %}
+                                    </a>
+                                </th>
+                                <th style="min-width: 200px;">
+                                    <a href="?sort_by=security_name&sort_order={% if sort_by == 'security_name' and sort_order == 'asc' %}desc{% else %}asc{% endif %}{% if search %}&search={{ search }}{% endif %}{% if status %}&status={{ status }}{% endif %}{% if security_type %}&security_type={{ security_type }}{% endif %}{% if src_system %}&src_system={{ src_system }}{% endif %}" class="text-dark text-decoration-none">
+                                        Security Name {% if sort_by == 'security_name' %}{% if sort_order == 'asc' %}<i class="bi bi-sort-up"></i>{% else %}<i class="bi bi-sort-down"></i>{% endif %}{% else %}<i class="bi bi-arrow-down-up text-muted" style="opacity:.4;"></i>{% endif %}
+                                    </a>
+                                </th>
+                                <th style="min-width: 280px;">Description</th>
+                                <th style="min-width: 130px;">
+                                    <a href="?sort_by=isin&sort_order={% if sort_by == 'isin' and sort_order == 'asc' %}desc{% else %}asc{% endif %}{% if search %}&search={{ search }}{% endif %}{% if status %}&status={{ status }}{% endif %}{% if security_type %}&security_type={{ security_type }}{% endif %}{% if src_system %}&src_system={{ src_system }}{% endif %}" class="text-dark text-decoration-none">
+                                        ISIN {% if sort_by == 'isin' %}{% if sort_order == 'asc' %}<i class="bi bi-sort-up"></i>{% else %}<i class="bi bi-sort-down"></i>{% endif %}{% else %}<i class="bi bi-arrow-down-up text-muted" style="opacity:.4;"></i>{% endif %}
+                                    </a>
+                                </th>
+                                <th style="min-width: 100px;">
+                                    <a href="?sort_by=ticker&sort_order={% if sort_by == 'ticker' and sort_order == 'asc' %}desc{% else %}asc{% endif %}{% if search %}&search={{ search }}{% endif %}{% if status %}&status={{ status }}{% endif %}{% if security_type %}&security_type={{ security_type }}{% endif %}{% if src_system %}&src_system={{ src_system }}{% endif %}" class="text-dark text-decoration-none">
+                                        Ticker {% if sort_by == 'ticker' %}{% if sort_order == 'asc' %}<i class="bi bi-sort-up"></i>{% else %}<i class="bi bi-sort-down"></i>{% endif %}{% else %}<i class="bi bi-arrow-down-up text-muted" style="opacity:.4;"></i>{% endif %}
+                                    </a>
+                                </th>
+                                <th style="min-width: 150px;">
+                                    <a href="?sort_by=issuer&sort_order={% if sort_by == 'issuer' and sort_order == 'asc' %}desc{% else %}asc{% endif %}{% if search %}&search={{ search }}{% endif %}{% if status %}&status={{ status }}{% endif %}{% if security_type %}&security_type={{ security_type }}{% endif %}{% if src_system %}&src_system={{ src_system }}{% endif %}" class="text-dark text-decoration-none">
+                                        Issuer {% if sort_by == 'issuer' %}{% if sort_order == 'asc' %}<i class="bi bi-sort-up"></i>{% else %}<i class="bi bi-sort-down"></i>{% endif %}{% else %}<i class="bi bi-arrow-down-up text-muted" style="opacity:.4;"></i>{% endif %}
+                                    </a>
+                                </th>
+                                <th style="min-width: 150px;">
+                                    <a href="?sort_by=security_type&sort_order={% if sort_by == 'security_type' and sort_order == 'asc' %}desc{% else %}asc{% endif %}{% if search %}&search={{ search }}{% endif %}{% if status %}&status={{ status }}{% endif %}{% if security_type %}&security_type={{ security_type }}{% endif %}{% if src_system %}&src_system={{ src_system }}{% endif %}" class="text-dark text-decoration-none">
+                                        Security Type {% if sort_by == 'security_type' %}{% if sort_order == 'asc' %}<i class="bi bi-sort-up"></i>{% else %}<i class="bi bi-sort-down"></i>{% endif %}{% else %}<i class="bi bi-arrow-down-up text-muted" style="opacity:.4;"></i>{% endif %}
+                                    </a>
+                                </th>
+                                <th style="min-width: 150px;">
+                                    <a href="?sort_by=security_sub_type&sort_order={% if sort_by == 'security_sub_type' and sort_order == 'asc' %}desc{% else %}asc{% endif %}{% if search %}&search={{ search }}{% endif %}{% if status %}&status={{ status }}{% endif %}{% if security_type %}&security_type={{ security_type }}{% endif %}{% if src_system %}&src_system={{ src_system }}{% endif %}" class="text-dark text-decoration-none">
+                                        Security Sub Type {% if sort_by == 'security_sub_type' %}{% if sort_order == 'asc' %}<i class="bi bi-sort-up"></i>{% else %}<i class="bi bi-sort-down"></i>{% endif %}{% else %}<i class="bi bi-arrow-down-up text-muted" style="opacity:.4;"></i>{% endif %}
+                                    </a>
+                                </th>
+                                <th style="min-width: 150px;">
+                                    <a href="?sort_by=investment_type&sort_order={% if sort_by == 'investment_type' and sort_order == 'asc' %}desc{% else %}asc{% endif %}{% if search %}&search={{ search }}{% endif %}{% if status %}&status={{ status }}{% endif %}{% if security_type %}&security_type={{ security_type }}{% endif %}{% if src_system %}&src_system={{ src_system }}{% endif %}" class="text-dark text-decoration-none">
+                                        Investment Type {% if sort_by == 'investment_type' %}{% if sort_order == 'asc' %}<i class="bi bi-sort-up"></i>{% else %}<i class="bi bi-sort-down"></i>{% endif %}{% else %}<i class="bi bi-arrow-down-up text-muted" style="opacity:.4;"></i>{% endif %}
+                                    </a>
+                                </th>
+                                <th style="min-width: 130px;">
+                                    <a href="?sort_by=quoted_unquoted&sort_order={% if sort_by == 'quoted_unquoted' and sort_order == 'asc' %}desc{% else %}asc{% endif %}{% if search %}&search={{ search }}{% endif %}{% if status %}&status={{ status }}{% endif %}{% if security_type %}&security_type={{ security_type }}{% endif %}{% if src_system %}&src_system={{ src_system }}{% endif %}" class="text-dark text-decoration-none">
+                                        Quoted/Unquoted {% if sort_by == 'quoted_unquoted' %}{% if sort_order == 'asc' %}<i class="bi bi-sort-up"></i>{% else %}<i class="bi bi-sort-down"></i>{% endif %}{% else %}<i class="bi bi-arrow-down-up text-muted" style="opacity:.4;"></i>{% endif %}
+                                    </a>
+                                </th>
+                                <th style="min-width: 120px;">
+                                    <a href="?sort_by=market&sort_order={% if sort_by == 'market' and sort_order == 'asc' %}desc{% else %}asc{% endif %}{% if search %}&search={{ search }}{% endif %}{% if status %}&status={{ status }}{% endif %}{% if security_type %}&security_type={{ security_type }}{% endif %}{% if src_system %}&src_system={{ src_system }}{% endif %}" class="text-dark text-decoration-none">
+                                        Market {% if sort_by == 'market' %}{% if sort_order == 'asc' %}<i class="bi bi-sort-up"></i>{% else %}<i class="bi bi-sort-down"></i>{% endif %}{% else %}<i class="bi bi-arrow-down-up text-muted" style="opacity:.4;"></i>{% endif %}
+                                    </a>
+                                </th>
+                                <th style="min-width: 150px;">
+                                    <a href="?sort_by=industry&sort_order={% if sort_by == 'industry' and sort_order == 'asc' %}desc{% else %}asc{% endif %}{% if search %}&search={{ search }}{% endif %}{% if status %}&status={{ status }}{% endif %}{% if security_type %}&security_type={{ security_type }}{% endif %}{% if src_system %}&src_system={{ src_system }}{% endif %}" class="text-dark text-decoration-none">
+                                        Industry {% if sort_by == 'industry' %}{% if sort_order == 'asc' %}<i class="bi bi-sort-up"></i>{% else %}<i class="bi bi-sort-down"></i>{% endif %}{% else %}<i class="bi bi-arrow-down-up text-muted" style="opacity:.4;"></i>{% endif %}
+                                    </a>
+                                </th>
+                                <th style="min-width: 100px;">
+                                    <a href="?sort_by=currency_code&sort_order={% if sort_by == 'currency_code' and sort_order == 'asc' %}desc{% else %}asc{% endif %}{% if search %}&search={{ search }}{% endif %}{% if status %}&status={{ status }}{% endif %}{% if security_type %}&security_type={{ security_type }}{% endif %}{% if src_system %}&src_system={{ src_system }}{% endif %}" class="text-dark text-decoration-none">
+                                        Currency {% if sort_by == 'currency_code' %}{% if sort_order == 'asc' %}<i class="bi bi-sort-up"></i>{% else %}<i class="bi bi-sort-down"></i>{% endif %}{% else %}<i class="bi bi-arrow-down-up text-muted" style="opacity:.4;"></i>{% endif %}
+                                    </a>
+                                </th>
+                                <th style="min-width: 160px;">
+                                    <a href="?sort_by=country_of_incorporation&sort_order={% if sort_by == 'country_of_incorporation' and sort_order == 'asc' %}desc{% else %}asc{% endif %}{% if search %}&search={{ search }}{% endif %}{% if status %}&status={{ status }}{% endif %}{% if security_type %}&security_type={{ security_type }}{% endif %}{% if src_system %}&src_system={{ src_system }}{% endif %}" class="text-dark text-decoration-none">
+                                        Country of Inc. {% if sort_by == 'country_of_incorporation' %}{% if sort_order == 'asc' %}<i class="bi bi-sort-up"></i>{% else %}<i class="bi bi-sort-down"></i>{% endif %}{% else %}<i class="bi bi-arrow-down-up text-muted" style="opacity:.4;"></i>{% endif %}
+                                    </a>
+                                </th>
+                                <th style="min-width: 160px;">
+                                    <a href="?sort_by=country_of_issue&sort_order={% if sort_by == 'country_of_issue' and sort_order == 'asc' %}desc{% else %}asc{% endif %}{% if search %}&search={{ search }}{% endif %}{% if status %}&status={{ status }}{% endif %}{% if security_type %}&security_type={{ security_type }}{% endif %}{% if src_system %}&src_system={{ src_system }}{% endif %}" class="text-dark text-decoration-none">
+                                        Country of Issue {% if sort_by == 'country_of_issue' %}{% if sort_order == 'asc' %}<i class="bi bi-sort-up"></i>{% else %}<i class="bi bi-sort-down"></i>{% endif %}{% else %}<i class="bi bi-arrow-down-up text-muted" style="opacity:.4;"></i>{% endif %}
+                                    </a>
+                                </th>
+                                <th style="min-width: 130px;">
+                                    <a href="?sort_by=exchange_code&sort_order={% if sort_by == 'exchange_code' and sort_order == 'asc' %}desc{% else %}asc{% endif %}{% if search %}&search={{ search }}{% endif %}{% if status %}&status={{ status }}{% endif %}{% if security_type %}&security_type={{ security_type }}{% endif %}{% if src_system %}&src_system={{ src_system }}{% endif %}" class="text-dark text-decoration-none">
+                                        Exchange Code {% if sort_by == 'exchange_code' %}{% if sort_order == 'asc' %}<i class="bi bi-sort-up"></i>{% else %}<i class="bi bi-sort-down"></i>{% endif %}{% else %}<i class="bi bi-arrow-down-up text-muted" style="opacity:.4;"></i>{% endif %}
+                                    </a>
+                                </th>
+                                <th style="min-width: 120px;">
+                                    <a href="?sort_by=status&sort_order={% if sort_by == 'status' and sort_order == 'asc' %}desc{% else %}asc{% endif %}{% if search %}&search={{ search }}{% endif %}{% if status %}&status={{ status }}{% endif %}{% if security_type %}&security_type={{ security_type }}{% endif %}{% if src_system %}&src_system={{ src_system }}{% endif %}" class="text-dark text-decoration-none">
+                                        Status {% if sort_by == 'status' %}{% if sort_order == 'asc' %}<i class="bi bi-sort-up"></i>{% else %}<i class="bi bi-sort-down"></i>{% endif %}{% else %}<i class="bi bi-arrow-down-up text-muted" style="opacity:.4;"></i>{% endif %}
+                                    </a>
+                                </th>
+                                <th style="min-width: 140px;">
+                                    <a href="?sort_by=created_at&sort_order={% if sort_by == 'created_at' and sort_order == 'asc' %}desc{% else %}asc{% endif %}{% if search %}&search={{ search }}{% endif %}{% if status %}&status={{ status }}{% endif %}{% if security_type %}&security_type={{ security_type }}{% endif %}{% if src_system %}&src_system={{ src_system }}{% endif %}" class="text-dark text-decoration-none">
+                                        Created At {% if sort_by == 'created_at' %}{% if sort_order == 'asc' %}<i class="bi bi-sort-up"></i>{% else %}<i class="bi bi-sort-down"></i>{% endif %}{% else %}<i class="bi bi-arrow-down-up text-muted" style="opacity:.4;"></i>{% endif %}
+                                    </a>
+                                </th>
+                                <th class="sticky-action-column" style="min-width: 120px;">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for security in page_obj %}
+                            <tr>
+                                <td>
+                                    {% if security.src_system|upper == 'CIS' %}
+                                        <span class="badge badge-success">CIS</span>
+                                    {% else %}
+                                        <span class="badge badge-secondary">{{ security.src_system|upper|default:"GMP" }}</span>
+                                    {% endif %}
+                                </td>
+                                <td><a href="{% url 'security:detail' security.security_id %}" class="text-decoration-none"><strong>{{ security.security_name }}</strong></a></td>
+                                <td class="text-muted" style="font-size:0.85rem;">{{ security.security_description|default:"-" }}</td>
+                                <td>{{ security.isin|default:"-" }}</td>
+                                <td>{{ security.ticker|default:"-" }}</td>
+                                <td>
+                                    {% if security.issuer %}
+                                        <a href="{% url 'reference_data:party_detail' security.issuer %}" class="text-decoration-none" title="View party: {{ security.issuer }}">
+                                            {{ security.issuer }}
+                                        </a>
+                                    {% else %}-{% endif %}
+                                </td>
+                                <td>{{ security.security_type|default:"-" }}</td>
+                                <td>{{ security.security_sub_type|default:"-" }}</td>
+                                <td>{{ security.investment_type|default:"-" }}</td>
+                                <td>{{ security.quoted_unquoted|default:"-" }}</td>
+                                <td>{{ security.market|default:"-" }}</td>
+                                <td>{{ security.industry|default:"-" }}</td>
+                                <td><span class="badge badge-info">{{ security.currency_code|default:"-" }}</span></td>
+                                <td>{{ security.country_of_incorporation|default:"-" }}</td>
+                                <td>{{ security.country_of_issue|default:"-" }}</td>
+                                <td>{{ security.exchange_code|default:"-" }}</td>
+                                <td>
+                                    {% if security.status == 'INITIAL' %}
+                                        <span class="badge badge-secondary">Initial</span>
+                                    {% elif security.status == 'MODIFIED' %}
+                                        <span class="badge badge-info">Modified</span>
+                                    {% elif security.status == 'VALIDATED' %}
+                                        <span class="badge badge-success">Validated</span>
+                                    {% else %}
+                                        <span class="badge badge-secondary">{{ security.status|default:"Unknown" }}</span>
+                                    {% endif %}
+                                </td>
+                                <td style="font-size: 0.85rem;">{{ security.created_at|default:"-" }}</td>
+                                <td class="sticky-action-column" style="background-color: white;">
+                                    <div class="btn-group btn-group-sm" role="group">
+                                        <a href="{% url 'security:detail' security.security_id %}" class="btn btn-sm btn-outline-primary" title="View Details">
+                                            <i class="bi bi-eye"></i>
+                                        </a>
+                                        {% can_act security "security" as sa %}
+                                        {% if sa.can_edit %}
+                                            <a href="{% url 'security:edit' security.security_id %}" class="btn btn-sm btn-outline-warning" title="Edit">
+                                                <i class="bi bi-pencil"></i>
+                                            </a>
+                                        {% endif %}
+                                    </div>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Pagination -->
+                {% if page_obj.has_other_pages %}
+                {% with sp="&sort_by="|add:sort_by|add:"&sort_order="|add:sort_order %}
+                <div class="card-footer">
+                    <nav aria-label="Security pagination">
+                        <ul class="pagination justify-content-center mb-0">
+                            {% if page_obj.has_previous %}
+                                <li class="page-item">
+                                    <a class="page-link" href="?page=1{{ sp }}{% if search %}&search={{ search }}{% endif %}{% if status %}&status={{ status }}{% endif %}{% if security_type %}&security_type={{ security_type }}{% endif %}{% if src_system %}&src_system={{ src_system }}{% endif %}">First</a>
+                                </li>
+                                <li class="page-item">
+                                    <a class="page-link" href="?page={{ page_obj.previous_page_number }}{{ sp }}{% if search %}&search={{ search }}{% endif %}{% if status %}&status={{ status }}{% endif %}{% if security_type %}&security_type={{ security_type }}{% endif %}{% if src_system %}&src_system={{ src_system }}{% endif %}">Previous</a>
+                                </li>
+                            {% endif %}
+
+                            <li class="page-item active">
+                                <span class="page-link">
+                                    Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}
+                                </span>
+                            </li>
+
+                            {% if page_obj.has_next %}
+                                <li class="page-item">
+                                    <a class="page-link" href="?page={{ page_obj.next_page_number }}{{ sp }}{% if search %}&search={{ search }}{% endif %}{% if status %}&status={{ status }}{% endif %}{% if security_type %}&security_type={{ security_type }}{% endif %}{% if src_system %}&src_system={{ src_system }}{% endif %}">Next</a>
+                                </li>
+                                <li class="page-item">
+                                    <a class="page-link" href="?page={{ page_obj.paginator.num_pages }}{{ sp }}{% if search %}&search={{ search }}{% endif %}{% if status %}&status={{ status }}{% endif %}{% if security_type %}&security_type={{ security_type }}{% endif %}{% if src_system %}&src_system={{ src_system }}{% endif %}">Last</a>
+                                </li>
+                            {% endif %}
+                        </ul>
+                    </nav>
+                </div>
+                {% endwith %}
+                {% endif %}
+            {% else %}
+                <div class="text-center py-5" style="color: var(--gray-500);">
+                    <i class="bi bi-shield-check" style="font-size: 3rem; opacity: 0.3;"></i>
+                    <p class="mt-3 mb-0">No securities found</p>
+                    {% if search or status or security_type or src_system %}
+                        <p class="text-muted">Try adjusting your filters</p>
+                    {% else %}
+                        <p class="text-muted mt-2">
+                            <a href="{% url 'security:create' %}" class="btn btn-primary">
+                                <i class="bi bi-plus-circle"></i> Create your first security
+                            </a>
+                        </p>
+                    {% endif %}
+                </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Info Alert -->
+    <div class="alert alert-info mt-4">
+        <i class="bi bi-info-circle"></i>
+        <strong>Maker-Checker Workflow:</strong>
+        <ul class="mb-0 mt-2">
+            <li><strong>Makers</strong> create securities in <strong>INITIAL</strong> status</li>
+            <li>Editing a security changes status to <strong>MODIFIED</strong></li>
+            <li><strong>Checkers</strong> validate → status becomes <strong>VALIDATED</strong></li>
+            <li><strong>Important:</strong> Makers cannot validate their own securities (Four-Eyes principle)</li>
+        </ul>
+    </div>
+</div>
+{% endblock %}

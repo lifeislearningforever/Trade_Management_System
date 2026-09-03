@@ -1,0 +1,775 @@
+[ERROR] 2026-04-23 20:50:37,821 core: Failed to execute write query: AnalysisException: Could not resolve column/field reference: 'exchange_code'
+
+[ERROR] 2026-04-23 20:50:37,823 core: Query: 
+                CREATE TABLE pos_stage_1_base
+                STORED AS PARQUET AS
+                SELECT
+                    ROW_NUMBER() OVER (ORDER BY portfolio, security_full_name) AS row_id,
+                    portfolio,
+                    security_full_name,
+                    security_short_name,
+                    isin,
+                    ticker,
+                    quantity,
+                    shares_outstanding,
+                    shares_issued,
+                    pct_holding,
+                    market_price,
+                    average_cost,
+                    cost_fc,
+                    market_value_fc,
+                    net_book_value_fc,
+                    unrealized_pnl_fc,
+                    provision_fc,
+                    cost_lc,
+                    market_value_lc,
+                    net_book_value_lc,
+                    unrealized_pnl_lc,
+                    provision_lc,
+                    product_type,
+                    security_type,
+                    quoted_unquoted,
+                    industry,
+                    fin_nonfin_co,
+                    issuer_type,
+                    reits_or_fund_y_n,
+                    exchange_code,
+                    country_code,
+                    country_of_exchange,
+                    country_of_incorporation,
+                    country_of_risk,
+                    country_of_operation,
+                    security_currency,
+                    corp_code,
+                    branch_code,
+                    cost_centre,
+                    cels,
+                    bwcif_sg,
+                    bwcif_ovs,
+                    mas_6d_code_sg,
+                    mas_6d_code_ovs,
+                    position_basis,
+                    reporting_date,
+                    maturity_date,
+                    src_system,
+                    sub_system,
+                    data_cat,
+                    data_frq,
+                    source_table,
+                    etl_insert_ts,
+                    etl_batch_id,
+                    src_id,
+                    processing_date
+                FROM gmp_cis.position_upload_standardized
+                WHERE src_id = 'cis_user_sta_adhoc_position_1'
+                  AND processing_date = '20260130'
+                
+[INFO] 2026-04-23 20:50:37,847 core: Write query executed and committed successfully
+[ERROR] 2026-04-23 20:50:37,864 core: Failed to execute write query: AnalysisException: Could not resolve table reference: 'pos_stage_1_base'
+
+[ERROR] 2026-04-23 20:50:37,866 core: Query: 
+                CREATE TABLE pos_stage_2_portfolio
+                STORED AS PARQUET AS
+                SELECT
+                    b.row_id,
+                    b.portfolio,
+                    b.isin,
+                    b.security_full_name,
+                    b.security_short_name,
+                    b.ticker,
+                    b.exchange_code,
+                    b.quantity,
+                    b.market_price,
+                    b.position_basis,
+                    b.src_id,
+                    b.processing_date,
+                    CASE
+                        WHEN p.portfolio_short_name IS NOT NULL THEN 'VALID'
+                        ELSE 'FAIL_PORTFOLIO_NOT_FOUND'
+                    END AS portfolio_status,
+                    p.portfolio_short_name AS matched_portfolio
+                FROM pos_stage_1_base b
+                LEFT JOIN gmp_cis.cis_portfolio p
+                    ON UPPER(TRIM(b.portfolio)) = UPPER(TRIM(p.portfolio_short_name))
+                   AND p.status NOT IN ('INACTIVE', 'CLOSED', 'DELETED')
+                
+[INFO] 2026-04-23 20:50:37,887 core: Write query executed and committed successfully
+[ERROR] 2026-04-23 20:50:37,821 core: Failed to execute write query: AnalysisException: Could not resolve column/field reference: 'exchange_code'
+
+[ERROR] 2026-04-23 20:50:37,823 core: Query: 
+                CREATE TABLE pos_stage_1_base
+                STORED AS PARQUET AS
+                SELECT
+                    ROW_NUMBER() OVER (ORDER BY portfolio, security_full_name) AS row_id,
+                    portfolio,
+                    security_full_name,
+                    security_short_name,
+                    isin,
+                    ticker,
+                    quantity,
+                    shares_outstanding,
+                    shares_issued,
+                    pct_holding,
+                    market_price,
+                    average_cost,
+                    cost_fc,
+                    market_value_fc,
+                    net_book_value_fc,
+                    unrealized_pnl_fc,
+                    provision_fc,
+                    cost_lc,
+                    market_value_lc,
+                    net_book_value_lc,
+                    unrealized_pnl_lc,
+                    provision_lc,
+                    product_type,
+                    security_type,
+                    quoted_unquoted,
+                    industry,
+                    fin_nonfin_co,
+                    issuer_type,
+                    reits_or_fund_y_n,
+                    exchange_code,
+                    country_code,
+                    country_of_exchange,
+                    country_of_incorporation,
+                    country_of_risk,
+                    country_of_operation,
+                    security_currency,
+                    corp_code,
+                    branch_code,
+                    cost_centre,
+                    cels,
+                    bwcif_sg,
+                    bwcif_ovs,
+                    mas_6d_code_sg,
+                    mas_6d_code_ovs,
+                    position_basis,
+                    reporting_date,
+                    maturity_date,
+                    src_system,
+                    sub_system,
+                    data_cat,
+                    data_frq,
+                    source_table,
+                    etl_insert_ts,
+                    etl_batch_id,
+                    src_id,
+                    processing_date
+                FROM gmp_cis.position_upload_standardized
+                WHERE src_id = 'cis_user_sta_adhoc_position_1'
+                  AND processing_date = '20260130'
+                
+[INFO] 2026-04-23 20:50:37,847 core: Write query executed and committed successfully
+[ERROR] 2026-04-23 20:50:37,864 core: Failed to execute write query: AnalysisException: Could not resolve table reference: 'pos_stage_1_base'
+
+[ERROR] 2026-04-23 20:50:37,866 core: Query: 
+                CREATE TABLE pos_stage_2_portfolio
+                STORED AS PARQUET AS
+                SELECT
+                    b.row_id,
+                    b.portfolio,
+                    b.isin,
+                    b.security_full_name,
+                    b.security_short_name,
+                    b.ticker,
+                    b.exchange_code,
+                    b.quantity,
+                    b.market_price,
+                    b.position_basis,
+                    b.src_id,
+                    b.processing_date,
+                    CASE
+                        WHEN p.portfolio_short_name IS NOT NULL THEN 'VALID'
+                        ELSE 'FAIL_PORTFOLIO_NOT_FOUND'
+                    END AS portfolio_status,
+                    p.portfolio_short_name AS matched_portfolio
+                FROM pos_stage_1_base b
+                LEFT JOIN gmp_cis.cis_portfolio p
+                    ON UPPER(TRIM(b.portfolio)) = UPPER(TRIM(p.portfolio_short_name))
+                   AND p.status NOT IN ('INACTIVE', 'CLOSED', 'DELETED')
+                
+[INFO] 2026-04-23 20:50:37,887 core: Write query executed and committed successfully
+[ERROR] 2026-04-23 20:50:38,009 core: Failed to execute write query: AnalysisException: Could not resolve table reference: 'pos_stage_2_portfolio'
+
+[ERROR] 2026-04-23 20:50:38,011 core: Query: 
+                CREATE TABLE pos_stage_3_security_isin
+                STORED AS PARQUET AS
+                SELECT
+                    p2.row_id,
+                    p2.portfolio_status,
+                    CASE
+                        WHEN p2.portfolio_status != 'VALID' THEN 'SKIPPED'
+                        WHEN p2.isin IS NOT NULL AND p2.isin != ''
+                             AND s.security_id IS NOT NULL THEN 'MATCHED_ISIN'
+                        ELSE 'NOT_MATCHED_ISIN'
+                    END AS security_status,
+                    s.security_id AS matched_security_id,
+                    s.security_name AS matched_security_name
+                FROM pos_stage_2_portfolio p2
+                LEFT JOIN gmp_cis.cis_security_kudu s
+                    ON UPPER(TRIM(p2.isin)) = UPPER(TRIM(s.isin))
+                   AND s.status NOT IN ('INACTIVE', 'DELETED')
+                
+[INFO] 2026-04-23 20:50:38,033 core: Write query executed and committed successfully
+[ERROR] 2026-04-23 20:50:38,049 core: Failed to execute write query: AnalysisException: Could not resolve table reference: 'pos_stage_3_security_isin'
+
+[ERROR] 2026-04-23 20:50:38,009 core: Failed to execute write query: AnalysisException: Could not resolve table reference: 'pos_stage_2_portfolio'
+
+[ERROR] 2026-04-23 20:50:38,011 core: Query: 
+                CREATE TABLE pos_stage_3_security_isin
+                STORED AS PARQUET AS
+                SELECT
+                    p2.row_id,
+                    p2.portfolio_status,
+                    CASE
+                        WHEN p2.portfolio_status != 'VALID' THEN 'SKIPPED'
+                        WHEN p2.isin IS NOT NULL AND p2.isin != ''
+                             AND s.security_id IS NOT NULL THEN 'MATCHED_ISIN'
+                        ELSE 'NOT_MATCHED_ISIN'
+                    END AS security_status,
+                    s.security_id AS matched_security_id,
+                    s.security_name AS matched_security_name
+                FROM pos_stage_2_portfolio p2
+                LEFT JOIN gmp_cis.cis_security_kudu s
+                    ON UPPER(TRIM(p2.isin)) = UPPER(TRIM(s.isin))
+                   AND s.status NOT IN ('INACTIVE', 'DELETED')
+                
+[INFO] 2026-04-23 20:50:38,033 core: Write query executed and committed successfully
+[ERROR] 2026-04-23 20:50:38,049 core: Failed to execute write query: AnalysisException: Could not resolve table reference: 'pos_stage_3_security_isin'
+
+[ERROR] 2026-04-23 20:50:38,051 core: Query: 
+                CREATE TABLE pos_stage_4_security_name
+                STORED AS PARQUET AS
+                SELECT
+                    s3.row_id,
+                    s3.portfolio_status,
+                    CASE
+                        WHEN s3.security_status = 'MATCHED_ISIN'   THEN 'MATCHED_ISIN'
+                        WHEN s3.security_status = 'SKIPPED'        THEN 'SKIPPED'
+                        WHEN s2.security_id IS NOT NULL             THEN 'MATCHED_NAME'
+                        ELSE 'FAIL_SECURITY_NOT_FOUND'
+                    END AS security_status,
+                    COALESCE(s3.matched_security_id, s2.security_id)     AS matched_security_id,
+                    COALESCE(s3.matched_security_name, s2.security_name) AS matched_security_name
+                FROM pos_stage_3_security_isin s3
+                JOIN pos_stage_2_portfolio p2 ON s3.row_id = p2.row_id
+                LEFT JOIN gmp_cis.cis_security_kudu s2
+                    ON s3.security_status = 'NOT_MATCHED_ISIN'
+                   AND (
+                       UPPER(TRIM(p2.security_full_name)) = UPPER(TRIM(s2.security_name))
+                    OR UPPER(TRIM(p2.security_short_name)) = UPPER(TRIM(s2.short_name))
+                   )
+                   AND s2.status NOT IN ('INACTIVE', 'DELETED')
+                
+[INFO] 2026-04-23 20:50:38,070 core: Write query executed and committed successfully
+[ERROR] 2026-04-23 20:50:38,087 core: Failed to execute write query: AnalysisException: Could not resolve table reference: 'pos_stage_4_security_name'
+
+[ERROR] 2026-04-23 20:50:38,089 core: Query: 
+                CREATE TABLE pos_stage_5_price
+                STORED AS PARQUET AS
+                SELECT
+                    s4.row_id,
+                    s4.portfolio_status,
+                    s4.security_status,
+                    s4.matched_security_id,
+                    s4.matched_security_name,
+                    CASE
+                        WHEN s4.security_status NOT IN ('MATCHED_ISIN', 'MATCHED_NAME')
+                            THEN 'SKIPPED'
+                        WHEN p2.market_price IS NOT NULL AND p2.market_price != ''
+                             AND CAST(p2.market_price AS DOUBLE) > 0
+                            THEN 'PRICE_FROM_UPLOAD'
+                        WHEN ep.main_closing_price IS NOT NULL
+                            THEN 'PRICE_FROM_EQUITY'
+                        ELSE 'FAIL_NO_PRICE'
+                    END AS price_status,
+                    COALESCE(
+                        NULLIF(p2.market_price, ''),
+                        CAST(ep.main_closing_price AS STRING)
+                    ) AS final_price,
+                    CASE
+                        WHEN p2.quantity IS NULL OR p2.quantity = ''
+                          OR CAST(p2.quantity AS DOUBLE) <= 0
+                            THEN 'FAIL_INVALID_QUANTITY'
+                        ELSE 'VALID'
+                    END AS quantity_status,
+                    CASE
+                        WHEN p2.exchange_code IS NULL OR p2.exchange_code = ''
+                            THEN 'FAIL_NO_EXCHANGE'
+                        ELSE 'VALID'
+                    END AS exchange_status
+                FROM pos_stage_4_security_name s4
+                JOIN pos_stage_2_portfolio p2 ON s4.row_id = p2.row_id
+                LEFT JOIN gmp_cis.cis_equity_price ep
+                    ON s4.matched_security_id IS NOT NULL
+                   AND ep.security_label = s4.matched_security_name
+                   AND ep.price_date = (
+                       SELECT MAX(price_date)
+                       FROM gmp_cis.cis_equity_price ep2
+                       WHERE ep2.security_label = s4.matched_security_name
+                   )
+                
+[INFO] 2026-04-23 20:50:38,113 core: Write query executed and committed successfully
+[ERROR] 2026-04-23 20:50:38,130 core: Failed to execute write query: AnalysisException: Could not resolve table reference: 'pos_stage_5_price'
+
+[ERROR] 2026-04-23 20:50:38,131 core: Query: 
+                CREATE TABLE position_upload_staging
+                STORED AS PARQUET AS
+                SELECT
+                    s5.row_id,
+                    s5.portfolio_status,
+                    s5.security_status,
+                    s5.price_status,
+                    s5.quantity_status,
+                    s5.exchange_status,
+                    s5.matched_security_id,
+                    s5.matched_security_name,
+                    s5.final_price,
+                    CASE
+                        WHEN s5.portfolio_status != 'VALID'
+                            THEN CONCAT('INVALID: ', s5.portfolio_status)
+                        WHEN s5.security_status NOT IN ('MATCHED_ISIN', 'MATCHED_NAME')
+                            THEN CONCAT('INVALID: ', s5.security_status)
+                        WHEN s5.quantity_status != 'VALID'
+                            THEN CONCAT('INVALID: ', s5.quantity_status)
+                        WHEN s5.exchange_status != 'VALID'
+                            THEN CONCAT('INVALID: ', s5.exchange_status)
+                        ELSE 'VALID'
+                    END AS overall_status
+                FROM pos_stage_5_price s5
+                
+[ERROR] 2026-04-23 20:50:38,153 core: Failed to execute write query: AnalysisException: Could not resolve table reference: 'pos_stage_1_base'
+
+[ERROR] 2026-04-23 20:50:38,156 core: Query: 
+                UPSERT INTO gmp_cis.cis_position
+                SELECT
+                    CONCAT(b.portfolio, '_', CAST(s.matched_security_id AS STRING),
+                           '_', b.position_basis, '_', b.processing_date) AS position_id,
+                    1 AS version_id,
+                    b.portfolio,
+                    COALESCE(s.matched_security_name,
+                             b.security_full_name,
+                             b.security_short_name) AS security_label,
+                    b.position_basis,
+                    COALESCE(NULLIF(b.reporting_date, ''), b.processing_date) AS position_date,
+                    'USER_UPLOAD' AS src_system,
+                    b.processing_date,
+                    CAST(b.quantity AS DOUBLE) AS quantity,
+                    CAST(b.average_cost AS DOUBLE) AS average_cost_fc,
+                    CAST(b.cost_fc AS DOUBLE) AS cost_fc,
+                    CAST(b.market_value_fc AS DOUBLE) AS market_value_fc,
+                    CAST(b.net_book_value_fc AS DOUBLE) AS net_book_value_fc,
+                    CAST(b.unrealized_pnl_fc AS DOUBLE) AS unrealized_pnl_fc,
+                    NULL AS average_cost_lc,
+                    CAST(b.cost_lc AS DOUBLE) AS cost_lc,
+                    CAST(b.market_value_lc AS DOUBLE) AS market_value_lc,
+                    CAST(b.net_book_value_lc AS DOUBLE) AS net_book_value_lc,
+                    CAST(b.unrealized_pnl_lc AS DOUBLE) AS unrealized_pnl_lc,
+                    CAST(b.provision_fc AS DOUBLE) AS provision_fc,
+                    CAST(b.provision_lc AS DOUBLE) AS provision_lc,
+                    0.0 AS dividend_fc,
+                    0.0 AS dividend_lc,
+                    0.0 AS realized_pnl_fc,
+                    0.0 AS realized_pnl_lc,
+                    b.isin,
+                    NULL AS uncall_fc,
+                    NULL AS uncall_lc,
+                    NULL AS pipeline_fc,
+                    NULL AS pipeline_lc,
+                    'OPEN' AS position_type,
+                    NOW() AS created_at,
+                    'VENH7U' AS created_by,
+                    NOW() AS updated_at,
+                    'VENH7U' AS updated_by
+                FROM pos_stage_1_base b
+                JOIN position_upload_staging s ON b.row_id = s.row_id
+                WHERE s.overall_status = 'VALID'
+                
+[ERROR] 2026-04-23 20:50:38,051 core: Query: 
+                CREATE TABLE pos_stage_4_security_name
+                STORED AS PARQUET AS
+                SELECT
+                    s3.row_id,
+                    s3.portfolio_status,
+                    CASE
+                        WHEN s3.security_status = 'MATCHED_ISIN'   THEN 'MATCHED_ISIN'
+                        WHEN s3.security_status = 'SKIPPED'        THEN 'SKIPPED'
+                        WHEN s2.security_id IS NOT NULL             THEN 'MATCHED_NAME'
+                        ELSE 'FAIL_SECURITY_NOT_FOUND'
+                    END AS security_status,
+                    COALESCE(s3.matched_security_id, s2.security_id)     AS matched_security_id,
+                    COALESCE(s3.matched_security_name, s2.security_name) AS matched_security_name
+                FROM pos_stage_3_security_isin s3
+                JOIN pos_stage_2_portfolio p2 ON s3.row_id = p2.row_id
+                LEFT JOIN gmp_cis.cis_security_kudu s2
+                    ON s3.security_status = 'NOT_MATCHED_ISIN'
+                   AND (
+                       UPPER(TRIM(p2.security_full_name)) = UPPER(TRIM(s2.security_name))
+                    OR UPPER(TRIM(p2.security_short_name)) = UPPER(TRIM(s2.short_name))
+                   )
+                   AND s2.status NOT IN ('INACTIVE', 'DELETED')
+                
+[INFO] 2026-04-23 20:50:38,070 core: Write query executed and committed successfully
+[ERROR] 2026-04-23 20:50:38,087 core: Failed to execute write query: AnalysisException: Could not resolve table reference: 'pos_stage_4_security_name'
+
+[ERROR] 2026-04-23 20:50:38,089 core: Query: 
+                CREATE TABLE pos_stage_5_price
+                STORED AS PARQUET AS
+                SELECT
+                    s4.row_id,
+                    s4.portfolio_status,
+                    s4.security_status,
+                    s4.matched_security_id,
+                    s4.matched_security_name,
+                    CASE
+                        WHEN s4.security_status NOT IN ('MATCHED_ISIN', 'MATCHED_NAME')
+                            THEN 'SKIPPED'
+                        WHEN p2.market_price IS NOT NULL AND p2.market_price != ''
+                             AND CAST(p2.market_price AS DOUBLE) > 0
+                            THEN 'PRICE_FROM_UPLOAD'
+                        WHEN ep.main_closing_price IS NOT NULL
+                            THEN 'PRICE_FROM_EQUITY'
+                        ELSE 'FAIL_NO_PRICE'
+                    END AS price_status,
+                    COALESCE(
+                        NULLIF(p2.market_price, ''),
+                        CAST(ep.main_closing_price AS STRING)
+                    ) AS final_price,
+                    CASE
+                        WHEN p2.quantity IS NULL OR p2.quantity = ''
+                          OR CAST(p2.quantity AS DOUBLE) <= 0
+                            THEN 'FAIL_INVALID_QUANTITY'
+                        ELSE 'VALID'
+                    END AS quantity_status,
+                    CASE
+                        WHEN p2.exchange_code IS NULL OR p2.exchange_code = ''
+                            THEN 'FAIL_NO_EXCHANGE'
+                        ELSE 'VALID'
+                    END AS exchange_status
+                FROM pos_stage_4_security_name s4
+                JOIN pos_stage_2_portfolio p2 ON s4.row_id = p2.row_id
+                LEFT JOIN gmp_cis.cis_equity_price ep
+                    ON s4.matched_security_id IS NOT NULL
+                   AND ep.security_label = s4.matched_security_name
+                   AND ep.price_date = (
+                       SELECT MAX(price_date)
+                       FROM gmp_cis.cis_equity_price ep2
+                       WHERE ep2.security_label = s4.matched_security_name
+                   )
+                
+[INFO] 2026-04-23 20:50:38,113 core: Write query executed and committed successfully
+[ERROR] 2026-04-23 20:50:38,130 core: Failed to execute write query: AnalysisException: Could not resolve table reference: 'pos_stage_5_price'
+
+[ERROR] 2026-04-23 20:50:38,131 core: Query: 
+                CREATE TABLE position_upload_staging
+                STORED AS PARQUET AS
+                SELECT
+                    s5.row_id,
+                    s5.portfolio_status,
+                    s5.security_status,
+                    s5.price_status,
+                    s5.quantity_status,
+                    s5.exchange_status,
+                    s5.matched_security_id,
+                    s5.matched_security_name,
+                    s5.final_price,
+                    CASE
+                        WHEN s5.portfolio_status != 'VALID'
+                            THEN CONCAT('INVALID: ', s5.portfolio_status)
+                        WHEN s5.security_status NOT IN ('MATCHED_ISIN', 'MATCHED_NAME')
+                            THEN CONCAT('INVALID: ', s5.security_status)
+                        WHEN s5.quantity_status != 'VALID'
+                            THEN CONCAT('INVALID: ', s5.quantity_status)
+                        WHEN s5.exchange_status != 'VALID'
+                            THEN CONCAT('INVALID: ', s5.exchange_status)
+                        ELSE 'VALID'
+                    END AS overall_status
+                FROM pos_stage_5_price s5
+                
+[ERROR] 2026-04-23 20:50:38,153 core: Failed to execute write query: AnalysisException: Could not resolve table reference: 'pos_stage_1_base'
+
+[ERROR] 2026-04-23 20:50:38,156 core: Query: 
+                UPSERT INTO gmp_cis.cis_position
+                SELECT
+                    CONCAT(b.portfolio, '_', CAST(s.matched_security_id AS STRING),
+                           '_', b.position_basis, '_', b.processing_date) AS position_id,
+                    1 AS version_id,
+                    b.portfolio,
+                    COALESCE(s.matched_security_name,
+                             b.security_full_name,
+                             b.security_short_name) AS security_label,
+                    b.position_basis,
+                    COALESCE(NULLIF(b.reporting_date, ''), b.processing_date) AS position_date,
+                    'USER_UPLOAD' AS src_system,
+                    b.processing_date,
+                    CAST(b.quantity AS DOUBLE) AS quantity,
+                    CAST(b.average_cost AS DOUBLE) AS average_cost_fc,
+                    CAST(b.cost_fc AS DOUBLE) AS cost_fc,
+                    CAST(b.market_value_fc AS DOUBLE) AS market_value_fc,
+                    CAST(b.net_book_value_fc AS DOUBLE) AS net_book_value_fc,
+                    CAST(b.unrealized_pnl_fc AS DOUBLE) AS unrealized_pnl_fc,
+                    NULL AS average_cost_lc,
+                    CAST(b.cost_lc AS DOUBLE) AS cost_lc,
+                    CAST(b.market_value_lc AS DOUBLE) AS market_value_lc,
+                    CAST(b.net_book_value_lc AS DOUBLE) AS net_book_value_lc,
+                    CAST(b.unrealized_pnl_lc AS DOUBLE) AS unrealized_pnl_lc,
+                    CAST(b.provision_fc AS DOUBLE) AS provision_fc,
+                    CAST(b.provision_lc AS DOUBLE) AS provision_lc,
+                    0.0 AS dividend_fc,
+                    0.0 AS dividend_lc,
+                    0.0 AS realized_pnl_fc,
+                    0.0 AS realized_pnl_lc,
+                    b.isin,
+                    NULL AS uncall_fc,
+                    NULL AS uncall_lc,
+                    NULL AS pipeline_fc,
+                    NULL AS pipeline_lc,
+                    'OPEN' AS position_type,
+                    NOW() AS created_at,
+                    'VENH7U' AS created_by,
+                    NOW() AS updated_at,
+                    'VENH7U' AS updated_by
+                FROM pos_stage_1_base b
+                JOIN position_upload_staging s ON b.row_id = s.row_id
+                WHERE s.overall_status = 'VALID'
+                
+[ERROR] 2026-04-23 20:50:38,319 core: Failed to execute write query: AnalysisException: Could not resolve table reference: 'pos_stage_1_base'
+
+[ERROR] 2026-04-23 20:50:38,322 core: Query: 
+                INSERT INTO TABLE gmp_cis.position_upload_report
+                PARTITION (src_id='cis_user_sta_adhoc_position_1', processing_date='20260130')
+                SELECT
+                    b.portfolio,
+                    COALESCE(b.security_full_name, b.security_short_name, b.isin) AS security_full_name,
+                    b.security_short_name,
+                    b.isin,
+                    b.ticker,
+                    b.quantity,
+                    b.shares_outstanding,
+                    b.shares_issued,
+                    b.pct_holding,
+                    b.market_price,
+                    b.average_cost,
+                    b.cost_fc,
+                    b.market_value_fc,
+                    b.net_book_value_fc,
+                    b.unrealized_pnl_fc,
+                    b.provision_fc,
+                    b.cost_lc,
+                    b.market_value_lc,
+                    b.net_book_value_lc,
+                    b.unrealized_pnl_lc,
+                    b.provision_lc,
+                    b.product_type,
+                    b.security_type,
+                    b.quoted_unquoted,
+                    b.industry,
+                    b.fin_nonfin_co,
+                    b.issuer_type,
+                    b.reits_or_fund_y_n,
+                    b.exchange_code,
+                    b.country_of_exchange,
+                    b.country_of_incorporation,
+                    b.country_of_risk,
+                    b.country_of_operation,
+                    b.security_currency,
+                    b.corp_code,
+                    b.branch_code,
+                    b.cost_centre,
+                    b.cels,
+                    b.bwcif_sg,
+                    b.bwcif_ovs,
+                    b.mas_6d_code_sg,
+                    b.mas_6d_code_ovs,
+                    b.position_basis,
+                    b.reporting_date,
+                    b.maturity_date,
+                    b.src_system,
+                    b.source_table,
+                    CASE
+                        WHEN s.overall_status = 'VALID' THEN 'PASS'
+                        ELSE 'FAIL'
+                    END AS row_status,
+                    CASE
+                        WHEN s.overall_status = 'VALID' THEN NULL
+                        ELSE s.overall_status
+                    END AS fail_reason,
+                    s.portfolio_status,
+                    s.security_status,
+                    s.price_status,
+                    s.quantity_status,
+                    s.exchange_status,
+                    CAST(s.matched_security_id AS STRING) AS matched_security_id,
+                    s.matched_security_name
+                FROM pos_stage_1_base b
+                JOIN position_upload_staging s ON b.row_id = s.row_id
+                
+[ERROR] 2026-04-23 20:50:38,319 core: Failed to execute write query: AnalysisException: Could not resolve table reference: 'pos_stage_1_base'
+
+[ERROR] 2026-04-23 20:50:38,322 core: Query: 
+                INSERT INTO TABLE gmp_cis.position_upload_report
+                PARTITION (src_id='cis_user_sta_adhoc_position_1', processing_date='20260130')
+                SELECT
+                    b.portfolio,
+                    COALESCE(b.security_full_name, b.security_short_name, b.isin) AS security_full_name,
+                    b.security_short_name,
+                    b.isin,
+                    b.ticker,
+                    b.quantity,
+                    b.shares_outstanding,
+                    b.shares_issued,
+                    b.pct_holding,
+                    b.market_price,
+                    b.average_cost,
+                    b.cost_fc,
+                    b.market_value_fc,
+                    b.net_book_value_fc,
+                    b.unrealized_pnl_fc,
+                    b.provision_fc,
+                    b.cost_lc,
+                    b.market_value_lc,
+                    b.net_book_value_lc,
+                    b.unrealized_pnl_lc,
+                    b.provision_lc,
+                    b.product_type,
+                    b.security_type,
+                    b.quoted_unquoted,
+                    b.industry,
+                    b.fin_nonfin_co,
+                    b.issuer_type,
+                    b.reits_or_fund_y_n,
+                    b.exchange_code,
+                    b.country_of_exchange,
+                    b.country_of_incorporation,
+                    b.country_of_risk,
+                    b.country_of_operation,
+                    b.security_currency,
+                    b.corp_code,
+                    b.branch_code,
+                    b.cost_centre,
+                    b.cels,
+                    b.bwcif_sg,
+                    b.bwcif_ovs,
+                    b.mas_6d_code_sg,
+                    b.mas_6d_code_ovs,
+                    b.position_basis,
+                    b.reporting_date,
+                    b.maturity_date,
+                    b.src_system,
+                    b.source_table,
+                    CASE
+                        WHEN s.overall_status = 'VALID' THEN 'PASS'
+                        ELSE 'FAIL'
+                    END AS row_status,
+                    CASE
+                        WHEN s.overall_status = 'VALID' THEN NULL
+                        ELSE s.overall_status
+                    END AS fail_reason,
+                    s.portfolio_status,
+                    s.security_status,
+                    s.price_status,
+                    s.quantity_status,
+                    s.exchange_status,
+                    CAST(s.matched_security_id AS STRING) AS matched_security_id,
+                    s.matched_security_name
+                FROM pos_stage_1_base b
+                JOIN position_upload_staging s ON b.row_id = s.row_id
+                
+[INFO] 2026-04-23 20:50:38,378 core: Write query executed and committed successfully
+[INFO] 2026-04-23 20:50:38,378 core: Write query executed and committed successfully
+[WARNING] 2026-04-23 20:50:38,573 core.repositories.system_date_repository: No active system date found in cis_system_date table
+[WARNING] 2026-04-23 20:50:38,575 core.services.system_date_service: No GMP file date available, using current date as fallback
+[INFO] 2026-04-23 20:50:38,588 core: Write query executed and committed successfully
+[INFO] 2026-04-23 20:50:38,613 core: Write query executed and committed successfully
+[INFO] 2026-04-23 20:50:38,636 core: Write query executed and committed successfully
+[WARNING] 2026-04-23 20:50:38,573 core.repositories.system_date_repository: No active system date found in cis_system_date table
+[WARNING] 2026-04-23 20:50:38,575 core.services.system_date_service: No GMP file date available, using current date as fallback
+[INFO] 2026-04-23 20:50:38,588 core: Write query executed and committed successfully
+[INFO] 2026-04-23 20:50:38,613 core: Write query executed and committed successfully
+[INFO] 2026-04-23 20:50:38,636 core: Write query executed and committed successfully
+[INFO] 2026-04-23 20:50:38,660 core: Write query executed and committed successfully
+[INFO] 2026-04-23 20:50:38,684 core: Write query executed and committed successfully
+[INFO] 2026-04-23 20:50:38,708 core: Write query executed and committed successfully
+[INFO] 2026-04-23 20:50:38,768 core: Write query executed and committed successfully
+[INFO] 2026-04-23 20:50:38,660 core: Write query executed and committed successfully
+[INFO] 2026-04-23 20:50:38,684 core: Write query executed and committed successfully
+[INFO] 2026-04-23 20:50:38,708 core: Write query executed and committed successfully
+[INFO] 2026-04-23 20:50:38,768 core: Write query executed and committed successfully
+[INFO] 2026-04-23 20:50:38,782 core.audit.audit_kudu_repository: Successfully inserted audit log into cis_audit_log
+[INFO] 2026-04-23 20:50:38,784 core.audit.audit_kudu_repository: AUDIT: [SUCCESS] VENH7U (2) - POSITION_ETL on FILE_UPLOAD#UPL-20260423205001-79452A41 - Position ETL complete for cis_user_sta_adhoc_position_1 / 20260130: 0 rows — None PASS, None FAIL
+[INFO] 2026-04-23 20:50:38,782 core.audit.audit_kudu_repository: Successfully inserted audit log into cis_audit_log
+[INFO] 2026-04-23 20:50:38,784 core.audit.audit_kudu_repository: AUDIT: [SUCCESS] VENH7U (2) - POSITION_ETL on FILE_UPLOAD#UPL-20260423205001-79452A41 - Position ETL complete for cis_user_sta_adhoc_position_1 / 20260130: 0 rows — None PASS, None FAIL
+[WARNING] 2026-04-23 20:50:39,838 core.repositories.system_date_repository: No active system date found in cis_system_date table
+[WARNING] 2026-04-23 20:50:39,840 core.services.system_date_service: No GMP file date available, using current date as fallback
+[WARNING] 2026-04-23 20:50:39,838 core.repositories.system_date_repository: No active system date found in cis_system_date table
+[WARNING] 2026-04-23 20:50:39,840 core.services.system_date_service: No GMP file date available, using current date as fallback
+[WARNING] 2026-04-23 20:50:40,367 core.repositories.system_date_repository: No active system date found in cis_system_date table
+[WARNING] 2026-04-23 20:50:40,369 core.services.system_date_service: No GMP file date available, using current date as fallback
+[WARNING] 2026-04-23 20:50:40,367 core.repositories.system_date_repository: No active system date found in cis_system_date table
+[WARNING] 2026-04-23 20:50:40,369 core.services.system_date_service: No GMP file date available, using current date as fallback
+[WARNING] 2026-04-23 20:50:41,087 core.repositories.system_date_repository: No active system date found in cis_system_date table
+[WARNING] 2026-04-23 20:50:41,089 core.services.system_date_service: No GMP file date available, using current date as fallback
+[WARNING] 2026-04-23 20:50:41,087 core.repositories.system_date_repository: No active system date found in cis_system_date table
+[WARNING] 2026-04-23 20:50:41,089 core.services.system_date_service: No GMP file date available, using current date as fallback
+[WARNING] 2026-04-23 20:50:42,517 core.repositories.system_date_repository: No active system date found in cis_system_date table
+[WARNING] 2026-04-23 20:50:42,519 core.services.system_date_service: No GMP file date available, using current date as fallback
+[WARNING] 2026-04-23 20:50:42,517 core.repositories.system_date_repository: No active system date found in cis_system_date table
+[WARNING] 2026-04-23 20:50:42,519 core.services.system_date_service: No GMP file date available, using current date as fallback
+[WARNING] 2026-04-23 20:50:43,866 core.repositories.system_date_repository: No active system date found in cis_system_date table
+[WARNING] 2026-04-23 20:50:43,866 core.services.system_date_service: No GMP file date available, using current date as fallback
+[WARNING] 2026-04-23 20:50:43,866 core.repositories.system_date_repository: No active system date found in cis_system_date table
+[WARNING] 2026-04-23 20:50:43,866 core.services.system_date_service: No GMP file date available, using current date as fallback
+[WARNING] 2026-04-23 20:50:45,197 core.repositories.system_date_repository: No active system date found in cis_system_date table
+[WARNING] 2026-04-23 20:50:45,199 core.services.system_date_service: No GMP file date available, using current date as fallback
+[WARNING] 2026-04-23 20:50:45,197 core.repositories.system_date_repository: No active system date found in cis_system_date table
+[WARNING] 2026-04-23 20:50:45,199 core.services.system_date_service: No GMP file date available, using current date as fallback
+[WARNING] 2026-04-23 20:50:46,450 core.repositories.system_date_repository: No active system date found in cis_system_date table
+[WARNING] 2026-04-23 20:50:46,452 core.services.system_date_service: No GMP file date available, using current date as fallback
+[WARNING] 2026-04-23 20:50:46,450 core.repositories.system_date_repository: No active system date found in cis_system_date table
+[WARNING] 2026-04-23 20:50:46,452 core.services.system_date_service: No GMP file date available, using current date as fallback
+[WARNING] 2026-04-23 20:50:47,735 core.repositories.system_date_repository: No active system date found in cis_system_date table
+[WARNING] 2026-04-23 20:50:47,737 core.services.system_date_service: No GMP file date available, using current date as fallback
+[WARNING] 2026-04-23 20:50:47,735 core.repositories.system_date_repository: No active system date found in cis_system_date table
+[WARNING] 2026-04-23 20:50:47,737 core.services.system_date_service: No GMP file date available, using current date as fallback
+[WARNING] 2026-04-23 20:50:48,989 core.repositories.system_date_repository: No active system date found in cis_system_date table
+[WARNING] 2026-04-23 20:50:48,991 core.services.system_date_service: No GMP file date available, using current date as fallback
+[WARNING] 2026-04-23 20:50:48,989 core.repositories.system_date_repository: No active system date found in cis_system_date table
+[WARNING] 2026-04-23 20:50:48,991 core.services.system_date_service: No GMP file date available, using current date as fallback
+[WARNING] 2026-04-23 20:50:50,279 core.repositories.system_date_repository: No active system date found in cis_system_date table
+[WARNING] 2026-04-23 20:50:50,281 core.services.system_date_service: No GMP file date available, using current date as fallback
+[WARNING] 2026-04-23 20:50:50,279 core.repositories.system_date_repository: No active system date found in cis_system_date table
+[WARNING] 2026-04-23 20:50:50,281 core.services.system_date_service: No GMP file date available, using current date as fallback
+[WARNING] 2026-04-23 20:50:51,525 core.repositories.system_date_repository: No active system date found in cis_system_date table
+[WARNING] 2026-04-23 20:50:51,526 core.services.system_date_service: No GMP file date available, using current date as fallback
+[WARNING] 2026-04-23 20:50:51,525 core.repositories.system_date_repository: No active system date found in cis_system_date table
+[WARNING] 2026-04-23 20:50:51,526 core.services.system_date_service: No GMP file date available, using current date as fallback
+[WARNING] 2026-04-23 20:50:52,765 core.repositories.system_date_repository: No active system date found in cis_system_date table
+[WARNING] 2026-04-23 20:50:52,768 core.services.system_date_service: No GMP file date available, using current date as fallback
+[WARNING] 2026-04-23 20:50:52,765 core.repositories.system_date_repository: No active system date found in cis_system_date table
+[WARNING] 2026-04-23 20:50:52,768 core.services.system_date_service: No GMP file date available, using current date as fallback
+[WARNING] 2026-04-23 20:50:54,063 core.repositories.system_date_repository: No active system date found in cis_system_date table
+[WARNING] 2026-04-23 20:50:54,066 core.services.system_date_service: No GMP file date available, using current date as fallback
+[WARNING] 2026-04-23 20:50:54,063 core.repositories.system_date_repository: No active system date found in cis_system_date table
+[WARNING] 2026-04-23 20:50:54,066 core.services.system_date_service: No GMP file date available, using current date as fallback
+[WARNING] 2026-04-23 20:50:55,314 core.repositories.system_date_repository: No active system date found in cis_system_date table
+[WARNING] 2026-04-23 20:50:55,315 core.services.system_date_service: No GMP file date available, using current date as fallback
+[WARNING] 2026-04-23 20:50:55,314 core.repositories.system_date_repository: No active system date found in cis_system_date table
+[WARNING] 2026-04-23 20:50:55,315 core.services.system_date_service: No GMP file date available, using current date as fallback
+[WARNING] 2026-04-23 20:50:56,559 core.repositories.system_date_repository: No active system date found in cis_system_date table
+[WARNING] 2026-04-23 20:50:56,561 core.services.system_date_service: No GMP file date available, using current date as fallback
+[WARNING] 2026-04-23 20:50:56,559 core.repositories.system_date_repository: No active system date found in cis_system_date table
+[WARNING] 2026-04-23 20:50:56,561 core.services.system_date_service: No GMP file date available, using current date as fallback
+[WARNING] 2026-04-23 20:50:57,809 core.repositories.system_date_repository: No active system date found in cis_system_date table
+[WARNING] 2026-04-23 20:50:57,812 core.services.system_date_service: No GMP file date available, using current date as fallback
+[WARNING] 2026-04-23 20:50:57,809 core.repositories.system_date_repository: No active system date found in cis_system_date table
+[WARNING] 2026-04-23 20:50:57,812 core.services.system_date_service: No GMP file date available, using current date as fallback
+[WARNING] 2026-04-23 20:50:59,055 core.repositories.system_date_repository: No active system date found in cis_system_date table
+[WARNING] 2026-04-23 20:50:59,057 core.services.system_date_service: No GMP file date available, using current date as fallback
+[WARNING] 2026-04-23 20:50:59,055 core.repositories.system_date_repository: No active system date found in cis_system_date table
+[WARNING] 2026-04-23 20:50:59,057 core.services.system_date_service: No GMP file date available, using current date as fallback
+[WARNING] 2026-04-23 20:51:00,298 core.repositories.system_date_repository: No active system date found in cis_system_date table
+[WARNING] 2026-04-23 20:51:00,300 core.services.system_date_service: No GMP file date available, using current date as fallback
+[WARNING] 2026-04-23 20:51:00,298 core.repositories.system_date_repository: No active system date found in cis_system_date table
+[WARNING] 2026-04-23 20:51:00,300 core.services.system_date_service: No GMP file date available, using current date as fallback
+[WARNING] 2026-04-23 20:51:01,591 core.repositories.system_date_repository: No active system date found in

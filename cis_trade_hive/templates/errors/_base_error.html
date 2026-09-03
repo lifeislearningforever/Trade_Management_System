@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}CIS Trade Hive{% endblock %}</title>
+    <style>
+        :root {
+            --primary-color: #1e3a8a;
+            --primary-light: #3b82f6;
+            --primary-dark: #1e293b;
+            --accent-color: #f59e0b;
+            --danger-color: {% block accent %}#3b82f6{% endblock %};
+        }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            min-height: 100vh;
+            font-family: 'Inter', -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+            background:
+                radial-gradient(circle at 15% 20%, rgba(59,130,246,0.10), transparent 40%),
+                radial-gradient(circle at 85% 80%, rgba(245,158,11,0.08), transparent 40%),
+                linear-gradient(135deg, var(--primary-dark) 0%, #0f1a30 100%);
+            color: #1f2937;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        /* Faint animated ticker line across the background, trade-desk motif */
+        .ticker-bg {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            opacity: 0.12;
+            pointer-events: none;
+        }
+        .ticker-bg svg { width: 200%; height: 140px; animation: drift 28s linear infinite; }
+        @keyframes drift {
+            from { transform: translateX(0); }
+            to { transform: translateX(-50%); }
+        }
+
+        .error-card {
+            position: relative;
+            background: #ffffff;
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.35);
+            padding: 44px 48px 40px;
+            max-width: 520px;
+            width: 100%;
+            text-align: center;
+        }
+
+        .icon-wrap {
+            width: 72px;
+            height: 72px;
+            margin: 0 auto 20px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: color-mix(in srgb, var(--danger-color) 12%, white);
+        }
+        .icon-wrap svg { width: 36px; height: 36px; }
+
+        .error-code {
+            font-size: 12px;
+            font-weight: 700;
+            letter-spacing: 0.12em;
+            color: var(--danger-color);
+            text-transform: uppercase;
+            margin-bottom: 10px;
+        }
+        h1 {
+            font-size: 23px;
+            font-weight: 700;
+            margin: 0 0 12px;
+            color: #111827;
+            letter-spacing: -0.01em;
+        }
+        p {
+            font-size: 15px;
+            line-height: 1.6;
+            color: #4b5563;
+            margin: 0 0 28px;
+        }
+
+        .actions {
+            display: flex;
+            gap: 12px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 11px 22px;
+            text-decoration: none;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            transition: transform 0.15s ease, box-shadow 0.15s ease;
+        }
+        .btn-primary {
+            background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-light) 100%);
+            color: #fff;
+        }
+        .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 8px 20px rgba(30,58,138,0.35); }
+        .btn-ghost {
+            background: #f3f4f6;
+            color: #374151;
+        }
+        .btn-ghost:hover { background: #e5e7eb; }
+
+        .footer-note {
+            margin-top: 28px;
+            font-size: 12px;
+            color: #9ca3af;
+        }
+        .footer-note code {
+            background: #f3f4f6;
+            padding: 1px 6px;
+            border-radius: 4px;
+            font-family: 'JetBrains Mono', monospace;
+        }
+    </style>
+</head>
+<body>
+    <div class="ticker-bg">
+        <svg viewBox="0 0 800 140" preserveAspectRatio="none" fill="none">
+            <path d="M0 100 L40 90 L80 105 L120 60 L160 75 L200 40 L240 55 L280 30 L320 50 L360 20 L400 45 L440 65 L480 35 L520 80 L560 55 L600 95 L640 70 L680 100 L720 60 L760 85 L800 50"
+                  stroke="#3b82f6" stroke-width="2" />
+            <path d="M0 100 L40 90 L80 105 L120 60 L160 75 L200 40 L240 55 L280 30 L320 50 L360 20 L400 45 L440 65 L480 35 L520 80 L560 55 L600 95 L640 70 L680 100 L720 60 L760 85 L800 50"
+                  stroke="#3b82f6" stroke-width="2" transform="translate(800,0)" />
+        </svg>
+    </div>
+
+    <div class="error-card">
+        <div class="icon-wrap">{% block icon %}{% endblock %}</div>
+        <div class="error-code">{% block code %}Error{% endblock %}</div>
+        <h1>{% block heading %}Something went wrong{% endblock %}</h1>
+        <p>{% block message %}Please try again, or contact support if the problem continues.{% endblock %}</p>
+        <div class="actions">
+            <a class="btn btn-primary" href="/">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12l9-9 9 9M5 10v10h14V10"/></svg>
+                Return to Dashboard
+            </a>
+            {% block extra_action %}{% endblock %}
+        </div>
+        <div class="footer-note">CIS Trade Hive{% block footer_extra %}{% endblock %}</div>
+    </div>
+</body>
+</html>

@@ -1,0 +1,15 @@
+{% extends "errors/_base_error.html" %}
+{% block title %}Bad Request - CIS Trade Hive{% endblock %}
+{% block accent %}#8b5cf6{% endblock %}
+{% block icon %}
+<svg viewBox="0 0 24 24" fill="none" stroke="#8b5cf6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M12 9v4M12 17h.01"/>
+    <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
+</svg>
+{% endblock %}
+{% block code %}Error 400 · Bad Request{% endblock %}
+{% block heading %}That request didn't check out{% endblock %}
+{% block message %}
+The request was malformed or contained invalid data — often caused by an expired form or a stale
+link. Please go back and try submitting it again.
+{% endblock %}

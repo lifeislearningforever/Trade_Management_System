@@ -1,0 +1,1328 @@
+#!/usr/bin/env python3
+"""
+CML (Cloudera Machine Learning) Application Entry Point
+
+This script serves as the entry point for deploying the CIS Trade Hive
+Django application as a CML Project Application.
+
+Features:
+- Multi-environment support (SIT, UAT, PROD, DR)
+- Kerberos authentication with automatic ticket renewal
+- Hybrid connection: Impala (reads) + Hive (writes)
+- Gunicorn WSGI server with configurable workers/threads
+- Trade Event Worker for async HISTORY and SETTLEMENT processing
+- Position Queue Worker for async AVP processing
+
+CML Application Configuration:
+- Script: config/cml_app.py
+- Subdomain: cis-trade-hive
+
+Environment Variables (set in CML Project Settings):
+- CIS_ENV: Environment name (SIT, UAT, PROD, DR) - REQUIRED
+- KRB5_KTNAME: Override Kerberos keytab path (optional)
+- KRB5_PRINCIPAL: Override Kerberos principal (optional)
+- KRB5CCNAME: Kerberos credential cache
+- TRADE_EVENT_WORKER_ENABLED: Set to '1' to enable trade event worker (default: enabled)
+- TRADE_EVENT_WORKER_POLL_INTERVAL: Poll interval in seconds (default: 5)
+- TRADE_EVENT_WORKER_BATCH_SIZE: Batch size for processing (default: 50)
+- POSITION_WORKER_ENABLED: Set to '1' to enable position worker (default: enabled)
+- POSITION_WORKER_POLL_INTERVAL: Poll interval in seconds (default: 10)
+- POSITION_WORKER_BATCH_SIZE: Batch size for processing (default: 100)
+
+Background Workers:
+==================
+Two background workers run alongside the main application:
+
+1. Trade Event Worker (cis_trade_event_queue)
+   - Processes HISTORY events: Insert trade history records for audit trail
+   - Processes SETTLEMENT events: Trigger settlement and AVP calculations
+   - Decouples trade save from post-trade processing for fast response
+   - SLA: < 5 minutes from queue to completion
+   - Retry: Max 3 attempts, then marked as FAILED
+
+2. Position Queue Worker (cis_position_queue)
+   - Processes position calculations for T+0 and backdated trades
+   - Updates cis_trade_position table with AVP values
+   - Handles chain recalculation for backdated trades
+   - SLA: < 5 minutes from queue to position update
+
+Trade Save Flow:
+===============
+1. User submits trade → insert_trade_fast() saves trade record (1-2s)
+2. Events queued to cis_trade_event_queue (async, non-blocking)
+3. Trade Event Worker picks up HISTORY event → inserts trade_history
+4. Trade Event Worker picks up SETTLEMENT event → calls settlement_service
+5. Settlement service queues to cis_position_queue (if T+0)
+6. Position Worker picks up and calculates AVP
+
+Queue Tables:
+- cis_trade_event_queue: HISTORY, SETTLEMENT events from trade save
+- cis_position_queue: Position calculations from settlement service
+- cis_settlement_queue: Future-dated settlements (T+1, T+2)
+
+Environments:
+- SIT:  owntmrwsg@TST.UOBNET.COM (System Integration Testing)
+- UAT:  ownumrwsg@SG.UOBNET.COM  (User Acceptance Testing)
+- PROD: ownumrwsg@SG.UOBNET.COM  (Production)
+- DR:   ownrmrwsg@SG.UOBNET.COM  (Disaster Recovery)
+
+Impala/Hive are configured via IMPALA_CONFIG and HIVE_CONFIG in settings.py
+"""
+
+import os
+import sys
+import subprocess
+import threading
+import time
+import signal
+
+# === CML Application Launcher ===
+WORKDIR = os.environ.get("WORKDIR", "/home/cdsw/CIS/")
+DJANGO_SETTINGS = os.environ.get("DJANGO_SETTINGS_MODULE", "config.settings")
+COLLECT_STATIC = os.environ.get("DJANGO_COLLECT_STATIC", "0") in ("1", "true", "True")
+print(os.environ.get("USER_OWNER"))
+print(os.environ.get("CDSW_USERNAME"))
+
+# ============================================================================
+# Environment Configuration
+# ============================================================================
+# Environment-specific Kerberos and connection settings
+
+ENV_CONFIGS = {
+    'SIT': {
+        'name': 'System Integration Testing',
+        'keytab': '/home/cdsw/CIS/secrets/owntmrwsg.keytab',
+        'principal': 'owntmrwsg@TST.UOBNET.COM',
+        'cache': 'FILE:/home/cdsw/CIS/krb5/krb5cc',
+    },
+    'UAT': {
+        'name': 'User Acceptance Testing',
+        'keytab': '/home/cdsw/CIS/secrets/ownumrwsg.keytab',
+        'principal': 'ownumrwsg@SG.UOBNET.COM',
+        'cache': 'FILE:/home/cdsw/CIS/krb5/krb5cc',
+    },
+    'PROD': {
+        'name': 'Production',
+        'keytab': '/home/cdsw/CIS/secrets/ownumrwsg.keytab',
+        'principal': 'ownumrwsg@SG.UOBNET.COM',
+        'cache': 'FILE:/home/cdsw/CIS/krb5/krb5cc',
+    },
+    'DR': {
+        'name': 'Disaster Recovery',
+        'keytab': '/home/cdsw/CIS/secrets/ownrmrwsg.keytab',
+        'principal': 'ownrmrwsg@SG.UOBNET.COM',
+        'cache': 'FILE:/home/cdsw/CIS/krb5/krb5cc',
+    },
+}
+
+
+def get_environment_config():
+    """
+    Get configuration for current environment.
+
+    Returns:
+        Tuple of (env_name, keytab, principal, cache)
+    """
+    # Get environment from CIS_ENV (required for CML)
+    cis_env = os.environ.get("CIS_ENV", "SIT").upper()
+
+    # Handle legacy 'work' value
+    if cis_env == "WORK":
+        cis_env = "SIT"
+
+    if cis_env not in ENV_CONFIGS:
+        print(f"WARNING: Unknown CIS_ENV '{cis_env}', defaulting to SIT")
+        cis_env = "SIT"
+
+    config = ENV_CONFIGS[cis_env]
+
+    # Allow environment variable overrides
+    keytab = os.environ.get("KRB5_KTNAME") or config['keytab']
+    principal = os.environ.get("KRB5_PRINCIPAL") or config['principal']
+    cache = os.environ.get("KRB5CCNAME") or config['cache']
+
+    return cis_env, keytab, principal, cache
+
+# Trade Event Worker Configuration (HISTORY, SETTLEMENT events)
+TRADE_EVENT_WORKER_ENABLED = os.environ.get("TRADE_EVENT_WORKER_ENABLED", "1") in ("1", "true", "True")
+TRADE_EVENT_WORKER_POLL_INTERVAL = int(os.environ.get("TRADE_EVENT_WORKER_POLL_INTERVAL", "5"))
+TRADE_EVENT_WORKER_BATCH_SIZE = int(os.environ.get("TRADE_EVENT_WORKER_BATCH_SIZE", "50"))
+
+# Position Worker Configuration (AVP calculations)
+POSITION_WORKER_ENABLED = os.environ.get("POSITION_WORKER_ENABLED", "1") in ("1", "true", "True")
+POSITION_WORKER_POLL_INTERVAL = int(os.environ.get("POSITION_WORKER_POLL_INTERVAL", "10"))
+POSITION_WORKER_BATCH_SIZE = int(os.environ.get("POSITION_WORKER_BATCH_SIZE", "100"))
+
+# Global flag for graceful shutdown
+_shutdown_requested = False
+_trade_event_worker_thread = None
+_position_worker_thread = None
+
+
+def run(cmd, env=None, check=True):
+    """Run a command and optionally check return code."""
+    print(f"$ {' '.join(cmd)}")
+    result = subprocess.run(cmd, env=env)
+    if check and result.returncode != 0:
+        sys.exit(result.returncode)
+    return result.returncode
+
+
+def kinit_with_keytab(keytab, principal, cache=None):
+    """Initialize Kerberos ticket using keytab."""
+    env = os.environ.copy()
+    if cache:
+        env["KRB5CCNAME"] = cache
+    print(f"==> kinit -kt {keytab} {principal}")
+    rc = subprocess.run(["kinit", "-kt", keytab, principal], env=env).returncode
+    if rc != 0:
+        print("ERROR: kinit failed. Verify keytab, principal, and krb5.conf.")
+        sys.exit(rc)
+    subprocess.run(["klist"], env=env)
+    return rc
+
+
+def start_kerberos_renewal_loop(keytab, principal, interval_sec=3600, cache=None):
+    """Start a background thread to renew Kerberos ticket periodically."""
+    def _renew():
+        env = os.environ.copy()
+        if cache:
+            env["KRB5CCNAME"] = cache
+        while True:
+            r = subprocess.run(["kinit", "-R"], env=env)
+            if r.returncode != 0:
+                print("Renewal failed; re-acquiring ticket via keytab...")
+                subprocess.run(["kinit", "-kt", keytab, principal], env=env)
+            time.sleep(interval_sec)
+
+    t = threading.Thread(target=_renew, daemon=True)
+    t.start()
+
+
+_worker_lock_fd = None  # File descriptor held for the lifetime of the process
+
+
+def start_trade_event_worker():
+    """
+    Start the Trade Event Worker in a background thread.
+
+    Only ONE gunicorn worker process runs the thread at a time.  A process-level
+    file lock (/tmp/cis_trade_event_worker.lock) ensures that when gunicorn spawns
+    multiple worker processes only the first one to acquire the lock actually starts
+    the background thread.  All others print a skip message and return — they still
+    serve HTTP requests normally.
+
+    Queue Table: cis_trade_event_queue
+    Event Types:
+    - HISTORY: Insert trade history record for audit trail
+    - SETTLEMENT: Trigger settlement and AVP calculation
+
+    Features:
+    - Processes events from cis_trade_event_queue
+    - SLA: < 5 minutes from queue to completion
+    - Auto-retry with max 3 attempts
+    - Stale PROCESSING recovery (events stuck > 5 min re-queued)
+    - Graceful shutdown on SIGTERM/SIGINT
+    """
+    global _trade_event_worker_thread, _shutdown_requested, _worker_lock_fd
+
+    if not TRADE_EVENT_WORKER_ENABLED:
+        print("==> Trade Event Worker: DISABLED (TRADE_EVENT_WORKER_ENABLED=0)", flush=True)
+        return
+
+    # --- Process-level lock: only ONE gunicorn worker runs the background thread ---
+    # Namespaced by CIS_ENV + app port (CDSW_APP_PORT is unique per running CML
+    # Application instance) so two separate CML apps landing on the same host/
+    # /tmp filesystem — e.g. two environments, or replicas — never contend for
+    # the same lock file. A global '/tmp/cis_trade_event_worker.lock' path let
+    # a second, unrelated app's flock() fail on the first app's lock, silently
+    # skipping start_trade_event_worker() there — trades booked in that app
+    # would queue events that were never picked up by any worker.
+    import fcntl as _fcntl
+    _lock_env = os.environ.get("CIS_ENV", "unknown")
+    _lock_port = os.environ.get("CDSW_APP_PORT") or os.environ.get("PORT", "unknown")
+    _lock_path = f"/tmp/cis_trade_event_worker_{_lock_env}_{_lock_port}.lock"
+    try:
+        _worker_lock_fd = open(_lock_path, 'w')
+        _fcntl.flock(_worker_lock_fd, _fcntl.LOCK_EX | _fcntl.LOCK_NB)
+        _worker_lock_fd.write(str(os.getpid()))
+        _worker_lock_fd.flush()
+        print(f"==> Trade Event Worker: Acquired process lock (pid={os.getpid()})", flush=True)
+    except BlockingIOError:
+        print(f"==> Trade Event Worker: Another gunicorn worker already holds the lock — skipping thread start (pid={os.getpid()})", flush=True)
+        return
+    # ---------------------------------------------------------------------------
+
+    print("==> Starting Trade Event Worker...", flush=True)
+    print(f"    Poll Interval: {TRADE_EVENT_WORKER_POLL_INTERVAL}s", flush=True)
+    print(f"    Batch Size: {TRADE_EVENT_WORKER_BATCH_SIZE}", flush=True)
+
+    def _worker_loop():
+        """Main worker loop - runs in background thread."""
+        global _shutdown_requested
+        import json
+        from datetime import datetime
+        from decimal import Decimal
+
+        # Import Django and services inside thread to ensure proper initialization
+        import django
+        django.setup()
+
+        from core.repositories.impala_connection import impala_manager
+        from core.notifications import notify_user
+        from core.notifications.constants import EVT_AVP_COMPLETED, EVT_AVP_FAILED
+
+        DATABASE = os.environ.get('IMPALA_DB', 'gmp_cis')
+        EVENT_QUEUE_TABLE = 'cis_trade_event_queue'
+        HISTORY_TABLE = 'cis_trade_history'
+
+        print("==> Trade Event Worker: Started", flush=True)
+
+        def process_history_event(event, event_data):
+            """Process a HISTORY event - insert trade history record."""
+            trade_id = event['trade_id']
+            deal_number = event['deal_number']
+            created_by = event['created_by']
+            action = event_data.get('action', 'CREATE')
+            old_status = event_data.get('old_status')
+            new_status = event_data.get('new_status', 'INITIAL')
+
+            timestamp = datetime.now()
+            history_id = int(timestamp.timestamp() * 1000)
+
+            query = f"""
+            UPSERT INTO {DATABASE}.{HISTORY_TABLE}
+            (history_id, trade_id, deal_number, action, old_status, new_status,
+             changes, comments, performed_by, performed_at)
+            VALUES (
+                {history_id},
+                {trade_id},
+                '{deal_number}',
+                '{action}',
+                {f"'{old_status}'" if old_status else 'NULL'},
+                '{new_status}',
+                '{{}}',
+                'Trade created',
+                '{created_by}',
+                '{timestamp.strftime('%Y-%m-%d %H:%M:%S')}'
+            )
+            """
+            impala_manager.execute_write(query, database=DATABASE)
+            print(f"==> Trade Event Worker: Inserted HISTORY for trade {trade_id}")
+
+        def process_settlement_event(event, event_data):
+            """Process a SETTLEMENT event - trigger settlement/AVP calculation."""
+            print(f"==> ENTERED process_settlement_event trade_id={event_data.get('trade_id')}", flush=True)
+            from trade.services.settlement_service import settlement_service
+
+            trade_id = event_data.get('trade_id')
+            created_by = event['created_by']
+
+            # Calculate total charges (manual + auto-calculated)
+            manual_charges = (
+                Decimal(str(event_data.get('commission', 0) or 0)) +
+                Decimal(str(event_data.get('sec_fee', 0) or 0)) +
+                Decimal(str(event_data.get('other_charges', 0) or 0))
+            )
+            auto_charges = (
+                Decimal(str(event_data.get('calculated_commission', 0) or 0)) +
+                Decimal(str(event_data.get('calculated_clearing_fee', 0) or 0)) +
+                Decimal(str(event_data.get('calculated_trading_fee', 0) or 0)) +
+                Decimal(str(event_data.get('calculated_gst', 0) or 0)) +
+                Decimal(str(event_data.get('calculated_other_fees', 0) or 0))
+            )
+            charges = manual_charges + auto_charges
+
+            # LC amounts carry the user's manually-overridden open_fx_rate (if any) from
+            # trade entry — must be threaded through so NON-REVAL cost_lc honors the
+            # override instead of falling back to a fresh FX-table lookup.
+            _raw_tlc = event_data.get('total_amount_lc')
+            _raw_glc = event_data.get('gross_amount_lc')
+            _raw_gfc = event_data.get('gross_amount_fc')
+            _trade_lc = Decimal(str(_raw_tlc)) if _raw_tlc else None
+            _gross_amount_lc = Decimal(str(_raw_glc)) if _raw_glc else None
+            _gross_amount_fc = Decimal(str(_raw_gfc)) if _raw_gfc else None
+
+            # Process settlement (this calculates AVP)
+            success, msg, result = settlement_service.process_trade_settlement(
+                trade_id=trade_id,
+                portfolio_id=event_data.get('portfolio_short_name', ''),
+                security_id=event_data.get('security_label', ''),
+                trade_type=event_data.get('trade_type', ''),
+                quantity=Decimal(str(event_data.get('quantity', 0) or 0)),
+                price=Decimal(str(event_data.get('price', 0) or 0)),
+                charges=charges,
+                trade_date=event_data.get('trade_date', ''),
+                settle_date=event_data.get('settle_date', ''),
+                updated_by=created_by,
+                security_currency=event_data.get('security_currency'),
+                portfolio_currency=event_data.get('portfolio_currency'),
+                isin=event_data.get('isin'),
+                security_name=event_data.get('security_name'),
+                custodian=event_data.get('custodian', ''),
+                sub_custodian=event_data.get('sub_custodian', ''),
+                trade_lc=_trade_lc,
+                gross_amount_lc=_gross_amount_lc,
+                gross_amount_fc=_gross_amount_fc,
+                async_mode=False  # Process synchronously in worker
+            )
+
+            if success:
+                print(f"==> Trade Event Worker: SETTLEMENT processed for trade {trade_id}: {msg}")
+                notify_user(created_by, EVT_AVP_COMPLETED, {
+                    'trade_id': trade_id,
+                    'portfolio_id': event_data.get('portfolio_short_name', ''),
+                    'security_id': event_data.get('security_label', ''),
+                    'message': f'AVP calculation complete for trade {trade_id}',
+                })
+            else:
+                print(f"==> Trade Event Worker: SETTLEMENT warning for trade {trade_id}: {msg}")
+                if 'queued' in msg.lower() or 'future' in msg.lower():
+                    # Not a failure — SETTLED basis was legitimately deferred to
+                    # cis_settlement_queue for a future settle_date.
+                    notify_user(created_by, EVT_AVP_COMPLETED, {
+                        'trade_id': trade_id,
+                        'message': f'Trade {trade_id} queued for settlement date',
+                    })
+                else:
+                    notify_user(created_by, EVT_AVP_FAILED, {
+                        'trade_id': trade_id,
+                        'message': f'AVP failed for trade {trade_id}: {msg}',
+                    })
+                    # Propagate failure to the dispatch loop so this event is
+                    # marked FAILED (and retried/dead-lettered) instead of
+                    # being marked COMPLETED despite process_trade_settlement
+                    # having failed — see mark_completed() call site.
+                    raise RuntimeError(f"SETTLEMENT processing failed for trade {trade_id}: {msg}")
+
+        def process_position_modify_event(event, event_data):
+            """Process a POSITION_MODIFY event - update position when trade is modified.
+
+            For trade modifications:
+            1. Reverse the old position effect (treat old BUY as SELL, vice versa)
+            2. Apply the new position effect
+
+            This ensures the position correctly reflects the new trade values.
+
+            Event data structure:
+            {
+                'old_trade': { ... original trade data ... },
+                'new_trade': { ... updated trade data ... }
+            }
+            """
+            from trade.services.position_service import position_service
+
+            # Extract old and new trade data from nested structure
+            old_trade = event_data.get('old_trade', {})
+            new_trade = event_data.get('new_trade', {})
+
+            trade_id = event['trade_id']
+            created_by = event['created_by']
+
+            # Get new trade values
+            portfolio_id = new_trade.get('portfolio_short_name', '')
+            security_id = new_trade.get('security_label', '')
+            trade_type = new_trade.get('trade_type', '')
+            quantity = Decimal(str(new_trade.get('quantity', 0) or 0))
+            price = Decimal(str(new_trade.get('price', 0) or 0))
+            trade_date = new_trade.get('trade_date', '')
+            settle_date = new_trade.get('settle_date', '')
+            position_date = settle_date or trade_date
+
+            # Calculate total charges for new trade (manual + auto-calculated)
+            manual_charges = (
+                Decimal(str(new_trade.get('commission', 0) or 0)) +
+                Decimal(str(new_trade.get('sec_fee', 0) or 0)) +
+                Decimal(str(new_trade.get('other_charges', 0) or 0))
+            )
+            auto_charges = (
+                Decimal(str(new_trade.get('calculated_commission', 0) or 0)) +
+                Decimal(str(new_trade.get('calculated_clearing_fee', 0) or 0)) +
+                Decimal(str(new_trade.get('calculated_trading_fee', 0) or 0)) +
+                Decimal(str(new_trade.get('calculated_gst', 0) or 0)) +
+                Decimal(str(new_trade.get('calculated_other_fees', 0) or 0))
+            )
+            charges = manual_charges + auto_charges
+
+            # Get old values from old_trade
+            old_quantity = Decimal(str(old_trade.get('quantity', 0) or 0))
+            old_price = Decimal(str(old_trade.get('price', 0) or 0))
+            old_manual_charges = (
+                Decimal(str(old_trade.get('commission', 0) or 0)) +
+                Decimal(str(old_trade.get('sec_fee', 0) or 0)) +
+                Decimal(str(old_trade.get('other_charges', 0) or 0))
+            )
+            old_charges = old_manual_charges
+
+            print(f"==> Trade Event Worker: POSITION_MODIFY processing trade {trade_id}")
+            print(f"    Portfolio: {portfolio_id}, Security: {security_id}")
+            print(f"    Old: qty={old_quantity}, price={old_price}, type={trade_type}")
+            print(f"    New: qty={quantity}, price={price}, type={trade_type}")
+
+            # Step 1: Reverse the old trade effect
+            # If original was BUY, reverse with SELL. If original was SELL, reverse with BUY.
+            reverse_type = 'SELL' if trade_type == 'BUY' else 'BUY'
+
+            if old_quantity > 0 and old_price > 0:
+                print(f"==> Trade Event Worker: Reversing old position ({reverse_type} {old_quantity}@{old_price})")
+                success1, msg1, _ = position_service.calculate_position(
+                    portfolio_id=portfolio_id,
+                    security_id=security_id,
+                    trade_type=reverse_type,
+                    quantity=old_quantity,
+                    price=old_price,
+                    charges=old_charges,
+                    position_date=position_date,
+                    trade_id=trade_id,
+                    updated_by=created_by,
+                    security_currency=new_trade.get('security_currency'),
+                    portfolio_currency=new_trade.get('portfolio_currency'),
+                    isin=new_trade.get('isin'),
+                    security_name=new_trade.get('security_name'),
+                    custodian=new_trade.get('custodian', ''),
+                    sub_custodian=new_trade.get('sub_custodian', ''),
+                    trade_lc=Decimal(str(old_trade['total_amount_lc'])) if old_trade.get('total_amount_lc') else None,
+                    gross_amount_lc=Decimal(str(old_trade['gross_amount_lc'])) if old_trade.get('gross_amount_lc') else None,
+                    gross_amount_fc=Decimal(str(old_trade['gross_amount_fc'])) if old_trade.get('gross_amount_fc') else None,
+                )
+                if not success1:
+                    print(f"==> Trade Event Worker: Reversal warning: {msg1}")
+
+            # Step 2: Apply the new trade effect
+            print(f"==> Trade Event Worker: Applying new position ({trade_type} {quantity}@{price})")
+            success, msg, result = position_service.calculate_position(
+                portfolio_id=portfolio_id,
+                security_id=security_id,
+                trade_type=trade_type,
+                quantity=quantity,
+                price=price,
+                charges=charges,
+                position_date=position_date,
+                trade_id=trade_id,
+                updated_by=created_by,
+                security_currency=new_trade.get('security_currency'),
+                portfolio_currency=new_trade.get('portfolio_currency'),
+                isin=new_trade.get('isin'),
+                security_name=new_trade.get('security_name'),
+                custodian=new_trade.get('custodian', ''),
+                sub_custodian=new_trade.get('sub_custodian', ''),
+                trade_lc=Decimal(str(new_trade['total_amount_lc'])) if new_trade.get('total_amount_lc') else None,
+                gross_amount_lc=Decimal(str(new_trade['gross_amount_lc'])) if new_trade.get('gross_amount_lc') else None,
+                gross_amount_fc=Decimal(str(new_trade['gross_amount_fc'])) if new_trade.get('gross_amount_fc') else None,
+            )
+
+            if success:
+                print(f"==> Trade Event Worker: POSITION_MODIFY completed for trade {trade_id}: {msg}")
+                notify_user(created_by, EVT_AVP_COMPLETED, {
+                    'trade_id': trade_id,
+                    'message': f'Position updated for modified trade {trade_id}',
+                })
+            else:
+                print(f"==> Trade Event Worker: POSITION_MODIFY warning for trade {trade_id}: {msg}")
+                notify_user(created_by, EVT_AVP_FAILED, {
+                    'trade_id': trade_id,
+                    'message': f'Position update failed for trade {trade_id}: {msg}',
+                })
+                # Propagate failure so the dispatch loop marks this event FAILED
+                # instead of COMPLETED — see mark_completed() call site.
+                raise RuntimeError(f"POSITION_MODIFY processing failed for trade {trade_id}: {msg}")
+
+        def process_position_cancel_event(event, event_data):
+            """Process a POSITION_CANCEL event - reverse position when trade is cancelled.
+
+            Steps:
+            1. Get the original trade details
+            2. Apply opposite trade (BUY -> SELL, SELL -> BUY) to reverse
+            """
+            from trade.services.position_service import position_service
+
+            trade_id = event['trade_id']
+            created_by = event['created_by']
+
+            # Get trade data (POSITION_CANCEL passes trade data directly, not nested)
+            portfolio_id = event_data.get('portfolio_short_name', '')
+            security_id = event_data.get('security_label', '')
+            original_trade_type = event_data.get('trade_type', '')
+            quantity = Decimal(str(event_data.get('quantity', 0) or 0))
+            price = Decimal(str(event_data.get('price', 0) or 0))
+            trade_date = event_data.get('trade_date', '')
+            settle_date = event_data.get('settle_date', '')
+            position_date = settle_date or trade_date
+
+            # Determine reversal type
+            reverse_type = 'SELL' if original_trade_type == 'BUY' else 'BUY'
+
+            print(f"==> Trade Event Worker: POSITION_CANCEL processing trade {trade_id}")
+            print(f"    Reversing {original_trade_type} with {reverse_type} ({quantity}@{price})")
+
+            # Process reversal (no charges on cancellation reversal)
+            success, msg, result = position_service.calculate_position(
+                portfolio_id=portfolio_id,
+                security_id=security_id,
+                trade_type=reverse_type,
+                quantity=quantity,
+                price=price,
+                charges=Decimal('0'),  # No charges on reversal
+                position_date=position_date,
+                trade_id=trade_id,
+                updated_by=created_by,
+                security_currency=event_data.get('security_currency'),
+                portfolio_currency=event_data.get('portfolio_currency'),
+                isin=event_data.get('isin'),
+                security_name=event_data.get('security_name'),
+                custodian=event_data.get('custodian', ''),
+                sub_custodian=event_data.get('sub_custodian', ''),
+                trade_lc=Decimal(str(event_data['total_amount_lc'])) if event_data.get('total_amount_lc') else None,
+                gross_amount_lc=Decimal(str(event_data['gross_amount_lc'])) if event_data.get('gross_amount_lc') else None,
+                gross_amount_fc=Decimal(str(event_data['gross_amount_fc'])) if event_data.get('gross_amount_fc') else None,
+            )
+
+            if success:
+                print(f"==> Trade Event Worker: POSITION_CANCEL completed for trade {trade_id}: {msg}")
+                notify_user(created_by, EVT_AVP_COMPLETED, {
+                    'trade_id': trade_id,
+                    'message': f'Position reversed for cancelled trade {trade_id}',
+                })
+            else:
+                print(f"==> Trade Event Worker: POSITION_CANCEL warning for trade {trade_id}: {msg}")
+                notify_user(created_by, EVT_AVP_FAILED, {
+                    'trade_id': trade_id,
+                    'message': f'Position reversal failed for trade {trade_id}: {msg}',
+                })
+                # Propagate failure so the dispatch loop marks this event FAILED
+                # instead of COMPLETED — see mark_completed() call site.
+                raise RuntimeError(f"POSITION_CANCEL processing failed for trade {trade_id}: {msg}")
+
+        def mark_processing(event_id, event):
+            """Mark event as PROCESSING before starting work (prevents double-processing)."""
+            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            upsert_query = f"""
+            UPSERT INTO {DATABASE}.{EVENT_QUEUE_TABLE}
+            (event_id, trade_id, deal_number, event_type, event_data, status,
+             retry_count, error_message, created_by, created_at, processing_started_at, processed_at)
+            VALUES (
+                {event_id},
+                {event['trade_id']},
+                '{event['deal_number']}',
+                '{event['event_type']}',
+                '{event['event_data'].replace('\\', '\\\\').replace("'", "\\'")}',
+                'PROCESSING',
+                {event.get('retry_count', 0)},
+                NULL,
+                '{event['created_by']}',
+                '{event['created_at']}',
+                '{timestamp}',
+                NULL
+            )
+            """
+            impala_manager.execute_write(upsert_query, database=DATABASE)
+
+        def mark_completed(event_id, event):
+            """Mark event as completed."""
+            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            processing_started_at = event.get('processing_started_at') or timestamp
+            upsert_query = f"""
+            UPSERT INTO {DATABASE}.{EVENT_QUEUE_TABLE}
+            (event_id, trade_id, deal_number, event_type, event_data, status,
+             retry_count, error_message, created_by, created_at, processing_started_at, processed_at)
+            VALUES (
+                {event_id},
+                {event['trade_id']},
+                '{event['deal_number']}',
+                '{event['event_type']}',
+                '{event['event_data'].replace('\\', '\\\\').replace("'", "\\'")}',
+                'COMPLETED',
+                {event.get('retry_count', 0)},
+                NULL,
+                '{event['created_by']}',
+                '{event['created_at']}',
+                '{processing_started_at}',
+                '{timestamp}'
+            )
+            """
+            impala_manager.execute_write(upsert_query, database=DATABASE)
+
+        def mark_failed(event_id, event, error_message, retry_count):
+            """Mark event as failed with error message."""
+            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            new_retry_count = retry_count + 1
+            status = 'FAILED' if new_retry_count >= 3 else 'PENDING'
+            error_escaped = error_message.replace('\\', '\\\\').replace("'", "\\'")[:500]
+            processing_started_at = event.get('processing_started_at') or timestamp
+
+            upsert_query = f"""
+            UPSERT INTO {DATABASE}.{EVENT_QUEUE_TABLE}
+            (event_id, trade_id, deal_number, event_type, event_data, status,
+             retry_count, error_message, created_by, created_at, processing_started_at, processed_at)
+            VALUES (
+                {event_id},
+                {event['trade_id']},
+                '{event['deal_number']}',
+                '{event['event_type']}',
+                '{event['event_data'].replace('\\', '\\\\').replace("'", "\\'")}',
+                '{status}',
+                {new_retry_count},
+                '{error_escaped}',
+                '{event['created_by']}',
+                '{event['created_at']}',
+                '{processing_started_at}',
+                '{timestamp}'
+            )
+            """
+            impala_manager.execute_write(upsert_query, database=DATABASE)
+
+        STALE_PROCESSING_TIMEOUT_SECONDS = 300  # 5 minutes
+        from datetime import timedelta as _timedelta
+
+        # Heartbeat so the poll loop's liveness is visible in Application Logs
+        # even during long stretches of empty polls (which are intentionally
+        # silent — see the DIAGNOSTIC comment below). Without this, a hung or
+        # dead loop looks identical to a healthy-but-idle one from the logs.
+        _last_heartbeat = time.time()
+        _HEARTBEAT_INTERVAL_SECONDS = 60
+
+        # Root cause of intermittent "trade created but never dispatched": the
+        # worker's own heartbeat went silent for 60-90s stretches, proving the
+        # poll loop itself was blocked — not an application logic bug. Most
+        # likely a slow/contended Impala connection under concurrent web +
+        # worker load (execute_query has no query-level timeout; only a 20s
+        # connection-acquisition timeout, which doesn't cover a query that's
+        # already running slowly on an acquired connection). PyHive/Impala's
+        # Python driver has no clean way to cancel a query mid-flight from
+        # another thread, so this wraps ONLY the poll query in a wall-clock
+        # timeout via a persistent single worker thread: if the query hasn't
+        # returned within POLL_QUERY_TIMEOUT_SECONDS, log it loudly and let
+        # the loop continue to its next 5s cycle instead of blocking
+        # indefinitely. The abandoned query keeps running in the background
+        # thread and its result is discarded when it eventually completes.
+        import concurrent.futures as _cf
+        _poll_executor = _cf.ThreadPoolExecutor(max_workers=1, thread_name_prefix="TradeEventPollQuery")
+        POLL_QUERY_TIMEOUT_SECONDS = 15
+
+        # Same root cause as the poll-query timeout above, applied to event
+        # PROCESSING itself: settlement_service/position_service make several
+        # execute_query/execute_write calls per event with no query-level
+        # timeout of their own. Previously, a single event landing on a slow/
+        # contended connection would block this thread for however long that
+        # query took — up to the full STALE_PROCESSING_TIMEOUT_SECONDS (5 min)
+        # before the stale-PROCESSING reclaim on a LATER poll cycle could even
+        # pick it back up, during which every other queued event sat waiting
+        # behind it. Wrapping the dispatch call the same way bounds the worst
+        # case to EVENT_PROCESSING_TIMEOUT_SECONDS and immediately marks the
+        # event FAILED (→ retried on the normal PENDING path) instead of
+        # leaving it silently stuck in PROCESSING with no log output.
+        #
+        # IMPORTANT: unlike the poll query's single shared _poll_executor, this
+        # must create a FRESH single-use executor per event, not one shared
+        # long-lived worker. A shared max_workers=1 executor's one thread stays
+        # occupied by the abandoned (still-running) handler after a timeout, so
+        # the very next event's submit() would queue behind it and block for
+        # however long the FIRST hang takes to finally return — defeating the
+        # whole point of the timeout. A throwaway executor per event lets the
+        # abandoned thread run to completion in the background (result
+        # discarded) without blocking anything that comes after it.
+        EVENT_PROCESSING_TIMEOUT_SECONDS = 60
+
+        while not _shutdown_requested:
+            try:
+                if time.time() - _last_heartbeat >= _HEARTBEAT_INTERVAL_SECONDS:
+                    print(
+                        f"==> Trade Event Worker: heartbeat {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} "
+                        f"(alive, polling every {TRADE_EVENT_WORKER_POLL_INTERVAL}s)",
+                        flush=True
+                    )
+                    _last_heartbeat = time.time()
+                # Compute stale-PROCESSING threshold (events running > 5 min are re-fetched)
+                stale_threshold = (
+                    datetime.now() - _timedelta(seconds=STALE_PROCESSING_TIMEOUT_SECONDS)
+                ).strftime('%Y-%m-%d %H:%M:%S')
+
+                # Fetch PENDING events AND stale PROCESSING events (stuck > 5 min)
+                query = f"""
+                SELECT event_id, trade_id, deal_number, event_type, event_data,
+                       retry_count, created_by, created_at, processing_started_at
+                FROM {DATABASE}.{EVENT_QUEUE_TABLE}
+                WHERE status = 'PENDING'
+                   OR (status = 'PROCESSING'
+                       AND processing_started_at IS NOT NULL
+                       AND processing_started_at < '{stale_threshold}')
+                ORDER BY created_at
+                LIMIT {TRADE_EVENT_WORKER_BATCH_SIZE}
+                """
+                # DIAGNOSTIC: measure poll query latency so we can correlate
+                # against real trade-creation timestamps if an event is ever
+                # reported as "not processing" — helps determine whether this
+                # is a Kudu read-after-write propagation delay or something
+                # else. Only logs when events are actually found — silent,
+                # empty polls (the overwhelming majority in production) are
+                # not logged to avoid flooding Application Logs every 5s.
+                # Remove once root-caused.
+                _poll_started = time.time()
+                try:
+                    _poll_future = _poll_executor.submit(impala_manager.execute_query, query, database=DATABASE)
+                    events = _poll_future.result(timeout=POLL_QUERY_TIMEOUT_SECONDS)
+                except _cf.TimeoutError:
+                    print(
+                        f"==> Trade Event Worker: WARNING poll query exceeded "
+                        f"{POLL_QUERY_TIMEOUT_SECONDS}s (elapsed={time.time() - _poll_started:.1f}s) — "
+                        f"abandoning this cycle, continuing to next poll. Likely Impala/Kudu "
+                        f"connection contention under concurrent load.",
+                        flush=True
+                    )
+                    events = None
+                if events:
+                    _poll_elapsed_ms = (time.time() - _poll_started) * 1000
+                    print(
+                        f"==> POLL {datetime.now().strftime('%Y-%m-%d %H:%M:%S,%f')[:-3]} "
+                        f"found={len(events)} query_ms={_poll_elapsed_ms:.0f}",
+                        flush=True
+                    )
+                    print(f"==> Trade Event Worker: Processing {len(events)} events...", flush=True)
+                    for event in events:
+                        if _shutdown_requested:
+                            break
+                        event_id = event['event_id']
+                        print(f"==> LOOP-START event_id={event_id} trade_id={event.get('trade_id')} event_type={event.get('event_type')!r}", flush=True)
+                        try:
+                            # Mark as PROCESSING first — prevents other workers/threads picking same event
+                            mark_processing(event_id, event)
+                            print(f"==> AFTER mark_processing event_id={event_id}", flush=True)
+                            # Store processing_started_at on event dict for mark_completed/mark_failed
+                            event['processing_started_at'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+                            event_type_raw = event.get('event_type')
+                            # Normalize before matching — whitespace/case variants (or a JSON
+                            # round-trip artifact) previously fell through to the `else` branch
+                            # below, which incorrectly marked the event COMPLETED without ever
+                            # running its handler. Matches trade_event_queue_service.py's own
+                            # normalization for the same comparison.
+                            event_type = (event_type_raw or '').strip().upper()
+                            event_data = json.loads(event.get('event_data', '{}'))
+                            print(f"==> DISPATCH event_id={event_id} event_type={event_type_raw!r} trade_id={event.get('trade_id')}", flush=True)
+
+                            if event_type == 'HISTORY':
+                                _handler = process_history_event
+                            elif event_type == 'SETTLEMENT':
+                                _handler = process_settlement_event
+                            elif event_type == 'POSITION_MODIFY':
+                                _handler = process_position_modify_event
+                            elif event_type == 'POSITION_CANCEL':
+                                _handler = process_position_cancel_event
+                            else:
+                                # Previously fell through to mark_completed() below without
+                                # running any handler — silently dropping the event. Now a
+                                # genuine failure so it retries / surfaces in dead-letter
+                                # instead of vanishing.
+                                raise ValueError(f"Unknown event_type: {event_type_raw!r}")
+
+                            _proc_started = time.time()
+                            try:
+                                # Fresh executor per event — see comment above on why this
+                                # must not be a shared/reused worker pool.
+                                _proc_executor = _cf.ThreadPoolExecutor(
+                                    max_workers=1, thread_name_prefix=f"TradeEventProc-{event_id}"
+                                )
+                                _proc_future = _proc_executor.submit(_handler, event, event_data)
+                                _proc_future.result(timeout=EVENT_PROCESSING_TIMEOUT_SECONDS)
+                            except _cf.TimeoutError:
+                                _elapsed = time.time() - _proc_started
+                                print(
+                                    f"==> Trade Event Worker: WARNING event_id={event_id} "
+                                    f"event_type={event_type_raw!r} exceeded "
+                                    f"{EVENT_PROCESSING_TIMEOUT_SECONDS}s (elapsed={_elapsed:.1f}s) — "
+                                    f"marking FAILED for retry, moving to next event. Likely "
+                                    f"Impala/Kudu connection contention under concurrent load. "
+                                    f"The abandoned handler keeps running in the background and "
+                                    f"its result is discarded when it eventually completes.",
+                                    flush=True
+                                )
+                                raise TimeoutError(
+                                    f"{event_type_raw} processing exceeded "
+                                    f"{EVENT_PROCESSING_TIMEOUT_SECONDS}s (elapsed={_elapsed:.1f}s)"
+                                )
+
+                            print(f"==> DISPATCH event_id={event_id} completed handler OK, marking COMPLETED", flush=True)
+                            mark_completed(event_id, event)
+
+                        except Exception as e:
+                            import traceback
+                            print(f"==> Trade Event Worker: Error processing event {event_id}: {e}", flush=True)
+                            traceback.print_exc()
+                            mark_failed(event_id, event, str(e), event.get('retry_count', 0))
+                else:
+                    # No events, sleep
+                    time.sleep(TRADE_EVENT_WORKER_POLL_INTERVAL)
+
+            except Exception as e:
+                import traceback
+                print(f"==> Trade Event Worker: Error in loop: {e}", flush=True)
+                traceback.print_exc()
+                time.sleep(TRADE_EVENT_WORKER_POLL_INTERVAL)
+
+        print("==> Trade Event Worker: Stopped", flush=True)
+
+    _trade_event_worker_thread = threading.Thread(target=_worker_loop, daemon=True, name="TradeEventWorker")
+    _trade_event_worker_thread.start()
+    print(
+        f"==> Trade Event Worker: Thread started "
+        f"(alive={_trade_event_worker_thread.is_alive()}, name={_trade_event_worker_thread.name})",
+        flush=True
+    )
+
+
+def start_position_worker():
+    """
+    Start the Position Queue Worker in a background thread.
+
+    This worker processes position calculations asynchronously,
+    decoupling them from trade save for faster response times.
+
+    Queue Table: cis_position_queue
+
+    Features:
+    - Processes T+0, backdated settlements from cis_position_queue
+    - SLA: < 5 minutes from queue to position update
+    - Auto-retry with max 3 attempts
+    - Chain recalculation for backdated trades
+    """
+    global _position_worker_thread, _shutdown_requested
+
+    if not POSITION_WORKER_ENABLED:
+        print("==> Position Worker: DISABLED (POSITION_WORKER_ENABLED=0)")
+        return
+
+    print("==> Starting Position Queue Worker...")
+    print(f"    Poll Interval: {POSITION_WORKER_POLL_INTERVAL}s")
+    print(f"    Batch Size: {POSITION_WORKER_BATCH_SIZE}")
+
+    def _worker_loop():
+        """Main worker loop - runs in background thread."""
+        global _shutdown_requested
+
+        # Import Django and services inside thread to ensure proper initialization
+        import django
+        django.setup()
+
+        from trade.services.position_queue_service import position_queue_service
+
+        print("==> Position Worker: Started")
+
+        while not _shutdown_requested:
+            try:
+                # Get pending items from queue
+                pending = position_queue_service.get_pending_items(
+                    limit=POSITION_WORKER_BATCH_SIZE
+                )
+
+                if pending:
+                    print(f"==> Position Worker: Processing {len(pending)} items...")
+                    for item in pending:
+                        if _shutdown_requested:
+                            break
+                        try:
+                            position_queue_service._process_item(item)
+                        except Exception as e:
+                            print(f"==> Position Worker: Error processing item {item.get('queue_id')}: {e}")
+
+                    # Log stats after batch
+                    stats = position_queue_service.get_queue_statistics()
+                    print(f"==> Position Worker: Queue stats - "
+                          f"pending={stats.get('pending', 0)}, "
+                          f"completed={stats.get('completed', 0)}, "
+                          f"failed={stats.get('failed', 0)}")
+                else:
+                    # No items, sleep
+                    time.sleep(POSITION_WORKER_POLL_INTERVAL)
+
+            except Exception as e:
+                print(f"==> Position Worker: Error in loop: {e}")
+                time.sleep(POSITION_WORKER_POLL_INTERVAL)
+
+        print("==> Position Worker: Stopped")
+
+    _position_worker_thread = threading.Thread(target=_worker_loop, daemon=True, name="PositionQueueWorker")
+    _position_worker_thread.start()
+    print("==> Position Worker: Thread started")
+
+
+def start_worker_health_monitor():
+    """
+    Start a background thread to monitor worker health and restart if needed.
+
+    Every 60 s:
+    - Checks thread liveness for TradeEventWorker and PositionQueueWorker
+    - Restarts any dead worker thread
+    - Polls /trade/api/worker-health/ HTTP endpoint and logs the response
+    - Prints queue stats (pending / completed / failed counts)
+    """
+    if not TRADE_EVENT_WORKER_ENABLED and not POSITION_WORKER_ENABLED:
+        return
+
+    import sys as _sys
+    _this_module = _sys.modules[__name__]
+
+    # Resolve the app port once — used for HTTP health check
+    _app_port = os.environ.get("CDSW_APP_PORT") or os.environ.get("PORT", "8080")
+
+    def _monitor():
+        while not getattr(_this_module, '_shutdown_requested', False):
+            time.sleep(60)
+
+            try:
+                # ── Thread liveness checks ──────────────────────────────────
+                if TRADE_EVENT_WORKER_ENABLED:
+                    t = getattr(_this_module, '_trade_event_worker_thread', None)
+                    if t and not t.is_alive():
+                        print("==> WorkerHealthMonitor: TradeEventWorker thread died — restarting...")
+                        start_trade_event_worker()
+                    else:
+                        print("==> WorkerHealthMonitor: TradeEventWorker OK")
+
+                if POSITION_WORKER_ENABLED:
+                    p = getattr(_this_module, '_position_worker_thread', None)
+                    if p and not p.is_alive():
+                        print("==> WorkerHealthMonitor: PositionWorker thread died — restarting...")
+                        start_position_worker()
+                    else:
+                        print("==> WorkerHealthMonitor: PositionWorker OK")
+
+                # ── cis_trade_event_queue SLA check (visibility only) ───────
+                # Alerts if an event has been PENDING longer than a few poll
+                # cycles should ever allow — this does NOT reprocess the event
+                # itself (that would mean a second copy of dispatch logic,
+                # which is what caused the cml_app.py / trade_event_queue_service
+                # duplication bug in the first place). It's purely an early
+                # warning so a stuck event is visible in logs immediately
+                # instead of only being noticed when a user reports it.
+                try:
+                    from core.repositories.impala_connection import impala_manager as _health_impala
+                    from datetime import datetime as _dt, timedelta as _health_td
+                    _stale_evt_threshold = (
+                        _dt.now() - _health_td(seconds=TRADE_EVENT_WORKER_POLL_INTERVAL * 6)
+                    ).strftime('%Y-%m-%d %H:%M:%S')
+                    _oldest_pending = _health_impala.execute_query(
+                        f"""
+                        SELECT event_id, trade_id, event_type, created_at,
+                               unix_timestamp(now()) - unix_timestamp(created_at) AS age_seconds
+                        FROM gmp_cis.cis_trade_event_queue
+                        WHERE status = 'PENDING' AND created_at < '{_stale_evt_threshold}'
+                        ORDER BY created_at ASC
+                        LIMIT 1
+                        """,
+                    )
+                    if _oldest_pending:
+                        _age = _oldest_pending[0].get('age_seconds', 0)
+                        print(
+                            f"==> WorkerHealthMonitor: WARNING — event_id={_oldest_pending[0]['event_id']} "
+                            f"trade_id={_oldest_pending[0]['trade_id']} type={_oldest_pending[0]['event_type']} "
+                            f"has been PENDING for {_age}s (SLA: {TRADE_EVENT_WORKER_POLL_INTERVAL * 6}s) — "
+                            f"TradeEventWorker may not be picking up new events. Investigate."
+                        )
+                    else:
+                        print("==> WorkerHealthMonitor: cis_trade_event_queue OK (no stale PENDING events)")
+                except Exception as _qe:
+                    print(f"==> WorkerHealthMonitor: cis_trade_event_queue check failed: {_qe}")
+
+                # ── HTTP health endpoint ────────────────────────────────────
+                try:
+                    result = subprocess.run(
+                        ["curl", "-s", "--max-time", "5",
+                         f"http://127.0.0.1:{_app_port}/trade/api/worker-health/"],
+                        capture_output=True, text=True
+                    )
+                    health_out = (result.stdout or "").strip()[:200]
+                    if health_out:
+                        print(f"==> WorkerHealthMonitor: HTTP health: {health_out}")
+                except Exception as he:
+                    print(f"==> WorkerHealthMonitor: HTTP health check failed: {he}")
+
+                # ── Kerberos ticket status ──────────────────────────────────
+                try:
+                    klist = subprocess.run(["klist", "-s"], capture_output=True)
+                    if klist.returncode != 0:
+                        print("==> WorkerHealthMonitor: Kerberos ticket EXPIRED — attempting renewal...")
+                        subprocess.run(["kinit", "-R"], capture_output=True)
+                except Exception as ke:
+                    print(f"==> WorkerHealthMonitor: klist check failed: {ke}")
+
+            except Exception as e:
+                print(f"==> WorkerHealthMonitor: Error - {e}")
+
+    monitor_thread = threading.Thread(target=_monitor, daemon=True, name="WorkerHealthMonitor")
+    monitor_thread.start()
+    print("==> WorkerHealthMonitor: Started (60s interval)")
+
+
+def signal_handler(signum, frame):
+    """Handle shutdown signals gracefully."""
+    global _shutdown_requested
+    print(f"\n==> Received signal {signum}, initiating graceful shutdown...")
+    _shutdown_requested = True
+
+
+def main():
+    """Main entry point for CML application deployment."""
+    global _shutdown_requested
+
+    # Setup signal handlers
+    signal.signal(signal.SIGTERM, signal_handler)
+    signal.signal(signal.SIGINT, signal_handler)
+
+    if WORKDIR:
+        os.chdir(WORKDIR)
+        # Add project root to sys.path so 'core', 'trade', etc. are importable
+        # by uvicorn/daphne worker processes that inherit this environment.
+        if WORKDIR not in sys.path:
+            sys.path.insert(0, WORKDIR)
+
+    # ==================== Environment Detection ====================
+    # Get environment-specific configuration (SIT, UAT, PROD, DR)
+    cis_env, keytab, principal, cache = get_environment_config()
+    env_config = ENV_CONFIGS.get(cis_env, {})
+
+    print("=" * 60)
+    print(f"  CIS Trade Hive - {env_config.get('name', cis_env)} Environment")
+    print("=" * 60)
+
+    # Set Django environment
+    os.environ.setdefault("DJANGO_SETTINGS_MODULE", DJANGO_SETTINGS)
+    os.environ.setdefault("DJANGO_ALLOWED_HOSTS", "*")
+
+    # Set CIS_ENV for settings.py to pick up
+    os.environ["CIS_ENV"] = cis_env
+
+    # Debug mode — True for SIT and UAT, False for PROD/DR only
+    # TODO: set UAT to False once static file serving is confirmed working
+    if cis_env in ("PROD", "DR"):
+        os.environ.setdefault("DJANGO_DEBUG", "False")
+    else:
+        os.environ.setdefault("DJANGO_DEBUG", "True")
+
+    # collectstatic must run for every deployed env except SIT (SIT serves static
+    # files another way — see settings.py comment on STATICFILES_STORAGE). UAT was
+    # previously excluded here, which left STATIC_ROOT empty and 404'd every
+    # static asset since urls.py's static() serves from STATIC_ROOT, not
+    # STATICFILES_DIRS.
+    if cis_env != "SIT":
+        os.environ["DJANGO_COLLECT_STATIC"] = "1"
+
+    # ==================== REST Proxy Configuration ====================
+    # Enable REST proxy mode for Hive operations (bypasses direct Hive connections)
+    # This is required in CML where glibc/SASL issues prevent direct connections
+    os.environ.setdefault("USE_REST_PROXY", "true")
+
+    # REST Proxy URL - Flask app running on edge node
+    # Change this to your edge node IP/hostname where app_v2.py is running
+    os.environ.setdefault("HIVE_PROXY_URL", "http://172.29.22.185:5000")
+
+    # Database name for Hive operations
+    os.environ.setdefault("HIVE_DATABASE", "mrw_ima")
+
+    # Optional: API key for proxy authentication (if configured on proxy)
+    # os.environ.setdefault("HIVE_PROXY_API_KEY", "your-api-key")
+
+    # Timeout for proxy requests (seconds)
+    os.environ.setdefault("HIVE_TIMEOUT", "300")
+
+    # ==================== Kerberos Authentication ====================
+    # Kerberos config from environment detection
+    print(f"==> Environment: {cis_env} ({env_config.get('name', 'Unknown')})")
+    print(f"==> Keytab: {keytab}")
+    print(f"==> Principal: {principal}")
+
+    # Obtain Kerberos TGT up-front (before commands that hit Impala/Hive)
+    kinit_with_keytab(keytab, principal, cache=cache)
+    start_kerberos_renewal_loop(keytab, principal, interval_sec=3600, cache=cache)
+
+    python_exec = sys.executable
+
+    # Run Django management commands
+    run([python_exec, "manage.py", "migrate"])
+    try:
+        run([python_exec, "manage.py", "verify_rbac"], check=False)
+    except Exception:
+        print("verify_rbac command not found; continuing...")
+
+    try:
+        run([python_exec, "manage.py", "create_hive_db"], check=False)
+    except Exception:
+        print("create_hive_db failed or not available; continuing...")
+
+    # Re-read at runtime — DJANGO_COLLECT_STATIC may have been set above
+    # inside main() after the module-level COLLECT_STATIC was evaluated.
+    if os.environ.get("DJANGO_COLLECT_STATIC", "0") in ("1", "true", "True"):
+        run([python_exec, "manage.py", "collectstatic", "--noinput"], check=True)
+
+    # ==================== Background Workers ====================
+    # Workers are started via gunicorn post_fork hook (see gunicorn_conf below)
+    # so they run INSIDE the worker process and share its InMemoryChannelLayer.
+    # Starting them here in the parent would give them a separate channel layer
+    # instance that WebSocket consumers (in the forked worker) cannot see.
+    # 3. Health Monitor only — watches thread liveness from the parent process
+    start_worker_health_monitor()
+
+    # Server configuration
+    # Uses gunicorn + uvicorn worker (ASGI) so WebSocket notifications work.
+    # Falls back to daphne if uvicorn is not installed.
+    port = os.environ.get("CDSW_APP_PORT") or os.environ.get("PORT", "8080")
+    bind = f"127.0.0.1:{os.environ.get('CDSW_APP_PORT', port)}"
+    # InMemoryChannelLayer is NOT shared across gunicorn worker processes.
+    # When REDIS_URL is set the channel layer is Redis-backed and workers > 1 is safe.
+    # Without Redis, force workers=1 so the Trade Event Worker thread and the
+    # WebSocket consumer are in the same process and share the same channel layer.
+    _redis_url = os.environ.get('REDIS_URL', '')
+    if os.environ.get("WORKERS"):
+        workers = os.environ.get("WORKERS")
+    elif _redis_url:
+        workers = str(8)
+    else:
+        workers = str(1)
+        print("==> WARNING: REDIS_URL not set — forcing workers=1 so InMemoryChannelLayer")
+        print("==>          is shared between Trade Event Worker and WebSocket consumers.")
+        print("==>          Set REDIS_URL to enable multi-worker mode with real-time notifications.")
+    timeout = os.environ.get("TIMEOUT", "120")
+    keepalive = os.environ.get("KEEPALIVE", "5")
+    asgi_app = f"{DJANGO_SETTINGS.rsplit('.', 1)[0]}.asgi:application"
+
+    print("=" * 60)
+    print("  Runtime Configuration")
+    print("=" * 60)
+    print(f"  Environment:         {cis_env} ({env_config.get('name', 'Unknown')})")
+    print(f"  Django Settings:     {os.environ['DJANGO_SETTINGS_MODULE']}")
+    print(f"  Debug Mode:          {os.environ.get('DJANGO_DEBUG')}")
+    print(f"  Allowed Hosts:       {os.environ.get('DJANGO_ALLOWED_HOSTS')}")
+    print(f"  Collect Static:      {COLLECT_STATIC}")
+    print("")
+    print("  ASGI Server (WebSocket-capable):")
+    print(f"    Bind:              {bind}")
+    print(f"    Workers:           {workers}")
+    print(f"    Worker Class:      uvicorn.workers.UvicornWorker (ASGI)")
+    print(f"    Timeout:           {timeout}")
+    print(f"    Keep-alive:        {keepalive}")
+    print(f"    App:               {asgi_app}")
+    print("")
+    print("  Kerberos:")
+    print(f"    Keytab:            {keytab}")
+    print(f"    Principal:         {principal}")
+    print(f"    Cache:             {cache}")
+    print("")
+    print("  REST Proxy:")
+    print(f"    Enabled:           {os.environ.get('USE_REST_PROXY')}")
+    print(f"    URL:               {os.environ.get('HIVE_PROXY_URL')}")
+    print(f"    Database:          {os.environ.get('HIVE_DATABASE')}")
+    print(f"    Timeout:           {os.environ.get('HIVE_TIMEOUT')}")
+    print("")
+    print("  Trade Event Worker:")
+    print(f"    Enabled:           {TRADE_EVENT_WORKER_ENABLED}")
+    print(f"    Poll Interval:     {TRADE_EVENT_WORKER_POLL_INTERVAL}s")
+    print(f"    Batch Size:        {TRADE_EVENT_WORKER_BATCH_SIZE}")
+    print(f"    Queue Table:       cis_trade_event_queue")
+    print(f"    Events:            HISTORY, SETTLEMENT")
+    print("")
+    print("  Position Worker:")
+    print(f"    Enabled:           {POSITION_WORKER_ENABLED}")
+    print(f"    Poll Interval:     {POSITION_WORKER_POLL_INTERVAL}s")
+    print(f"    Batch Size:        {POSITION_WORKER_BATCH_SIZE}")
+    print(f"    Queue Table:       cis_position_queue")
+    print("=" * 60)
+
+    # Write a gunicorn config file so worker processes don't re-run this
+    # startup script on fork (workers import the ASGI app, not cml_app.py).
+    gunicorn_conf = "/tmp/cis_gunicorn.conf.py"
+    gunicorn_conf_lines = [
+        "# Auto-generated by cml_app.py — do not edit manually",
+        "import sys, os",
+        # Set path FIRST at module level — before gunicorn imports the ASGI app
+        # so Django app registry can find core, trade, upload etc.
+        f"_root = {repr(WORKDIR)}",
+        "if _root not in sys.path: sys.path.insert(0, _root)",
+        f"os.environ.setdefault('PYTHONPATH', {repr(WORKDIR)})",
+        f"os.environ.setdefault('DJANGO_SETTINGS_MODULE', '{DJANGO_SETTINGS}')",
+        f"bind = '{bind}'",
+        f"workers = {workers}",
+        "worker_class = 'uvicorn.workers.UvicornWorker'",
+        f"timeout = {timeout}",
+        f"keepalive = {keepalive}",
+        "accesslog = '-'",
+        "errorlog  = '-'",
+        "loglevel  = 'info'",
+        # post_fork runs inside the worker process after gunicorn forks it.
+        # Starting the Trade Event Worker here ensures the worker thread and
+        # the WebSocket consumer share the SAME InMemoryChannelLayer instance
+        # (same process), so notify_user() actually reaches connected clients.
+        "",
+        "def post_fork(server, worker):",
+        "    import sys as _sys",
+        f"    _root2 = {repr(WORKDIR)}",
+        "    if _root2 not in _sys.path: _sys.path.insert(0, _root2)",
+        "    import config.cml_app as _cml",
+        "    try:",
+        "        _cml.start_trade_event_worker()",
+        "        print(f'==> post_fork: start_trade_event_worker() returned OK, pid={worker.pid}', flush=True)",
+        "    except Exception as _e:",
+        "        import traceback as _tb",
+        "        print(f'==> post_fork: start_trade_event_worker() FAILED: {_e}', flush=True)",
+        "        _tb.print_exc()",
+        "    try:",
+        "        _cml.start_position_worker()",
+        "        print(f'==> post_fork: start_position_worker() returned OK, pid={worker.pid}', flush=True)",
+        "    except Exception as _e:",
+        "        import traceback as _tb",
+        "        print(f'==> post_fork: start_position_worker() FAILED: {_e}', flush=True)",
+        "        _tb.print_exc()",
+    ]
+    with open(gunicorn_conf, "w") as _f:
+        _f.write("\n".join(gunicorn_conf_lines) + "\n")
+    print(f"==> Wrote gunicorn config: {gunicorn_conf}")
+
+    import shutil
+
+    # Prefer venv-relative binaries (same dir as sys.executable) so CML's venv
+    # is found even when its bin/ directory is not on the system PATH.
+    _bin_dir = os.path.dirname(sys.executable)
+
+    def _find_exe(name):
+        """Return full path to name in venv bin dir, falling back to PATH search."""
+        venv_path = os.path.join(_bin_dir, name)
+        if os.path.isfile(venv_path) and os.access(venv_path, os.X_OK):
+            return venv_path
+        return shutil.which(name)  # fallback to PATH
+
+    _gunicorn = _find_exe("gunicorn")
+    _daphne   = _find_exe("daphne")
+    print(f"==> ASGI server detection: python={sys.executable}")
+    print(f"==> ASGI server detection: gunicorn={_gunicorn or 'NOT FOUND'}")
+    print(f"==> ASGI server detection: daphne={_daphne or 'NOT FOUND'}")
+
+    if _gunicorn:
+        try:
+            import uvicorn  # noqa: F401 — verify importable before passing worker-class
+            # gunicorn forks worker processes — start_trade_event_worker() is called
+            # inside the worker via the post_fork hook in gunicorn_conf, NOT here.
+            print(f"==> Starting gunicorn (UvicornWorker/ASGI) → {bind}")
+            run([_gunicorn, "--config", gunicorn_conf, asgi_app])
+        except ImportError:
+            print("==> uvicorn not installed — falling back to daphne (ASGI)")
+            if _daphne:
+                # daphne is a single-process server — start workers here directly.
+                start_trade_event_worker()
+                start_position_worker()
+                run([_daphne, "-b", "127.0.0.1", "-p", port, asgi_app])
+            else:
+                print("==> WARNING: No ASGI server found. WebSocket notifications will NOT work!")
+                print("==>          Install: pip install uvicorn  OR  pip install daphne")
+                run([sys.executable, "manage.py", "runserver", bind])
+    elif _daphne:
+        # daphne is a single-process server — start workers here directly.
+        start_trade_event_worker()
+        start_position_worker()
+        print(f"==> Starting daphne (ASGI) → {bind}")
+        run([_daphne, "-b", "127.0.0.1", "-p", port, asgi_app])
+    else:
+        print("==> WARNING: No ASGI server found. WebSocket notifications will NOT work!")
+        print("==>          Install: pip install uvicorn  OR  pip install daphne")
+        run([sys.executable, "manage.py", "runserver", bind])
+
+
+if __name__ == "__main__":
+    main()

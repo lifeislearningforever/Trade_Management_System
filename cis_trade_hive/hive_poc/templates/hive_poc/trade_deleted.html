@@ -1,0 +1,56 @@
+{% extends 'hive_poc/base.html' %}
+{% block title %}Deleted Trades{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2>Deleted Trades</h2>
+    <a href="{% url 'hive_poc:trade_list' %}" class="btn btn-outline-primary">&larr; Back to Active</a>
+</div>
+
+<div class="card">
+    <div class="card-header bg-danger text-white">
+        Soft-Deleted Trades (deleted_at IS NOT NULL)
+    </div>
+    <div class="card-body">
+        {% if trades %}
+        <table class="table table-striped">
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Security</th>
+                    <th>Type</th>
+                    <th>Amount</th>
+                    <th>Deleted At</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for trade in trades %}
+                <tr class="table-danger">
+                    <td><code>{{ trade.trade_id }}</code></td>
+                    <td>{{ trade.security_name }}</td>
+                    <td>
+                        <span class="badge {% if trade.trade_type == 'BUY' %}bg-success{% else %}bg-danger{% endif %}">
+                            {{ trade.trade_type }}
+                        </span>
+                    </td>
+                    <td>{{ trade.currency }} {{ trade.trade_amount|floatformat:2 }}</td>
+                    <td>{{ trade.deleted_at }}</td>
+                    <td>
+                        <form method="post" action="{% url 'hive_poc:trade_restore' trade.trade_id %}" style="display:inline;">
+                            {% csrf_token %}
+                            <button type="submit" class="btn btn-sm btn-success">Restore</button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div class="alert alert-success">
+            No deleted trades. All trades are active.
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

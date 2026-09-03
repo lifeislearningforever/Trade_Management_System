@@ -1,0 +1,628 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}{% if portfolio %}Edit{% else %}Create{% endif %} Portfolio - CisTrade{% endblock %}
+
+{% block extra_css %}
+<!-- Select2 CSS - Local -->
+<link href="{% static 'css/select2.min.css' %}" rel="stylesheet" />
+<link href="{% static 'css/select2-bootstrap-5-theme.min.css' %}" rel="stylesheet" />
+<!-- CIS Trade Hive Select2 Custom Styles -->
+<link href="{% static 'css/select2-custom.css' %}" rel="stylesheet" />
+{% endblock %}
+
+{% block breadcrumb %}
+    <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
+    <li class="breadcrumb-item"><a href="{% url 'portfolio:list' %}">Portfolios</a></li>
+    <li class="breadcrumb-item active">{% if portfolio %}Edit{% else %}Create{% endif %}</li>
+{% endblock %}
+
+{% block content %}
+<div class="portfolio-form-container">
+    <!-- Page Header -->
+    <div class="content-header">
+        <h1 class="content-title">
+            <i class="bi bi-{% if portfolio %}pencil{% else %}plus-circle{% endif %} text-primary"></i>
+            {% if portfolio %}Edit Portfolio{% else %}Create New Portfolio{% endif %}
+        </h1>
+        <p class="content-subtitle">All fields marked with * are required</p>
+    </div>
+
+    <!-- Validation error banner (shown by JS when required fields are empty) -->
+    <div id="validation-banner" class="alert alert-danger d-none mb-3" role="alert">
+        <strong><i class="bi bi-exclamation-triangle-fill"></i> Please fill in all required fields:</strong>
+        <ul id="validation-banner-list" class="mb-0 mt-1"></ul>
+    </div>
+
+    <!-- Form Card -->
+    <div class="card">
+        <div class="card-body">
+            <form method="post" action="" id="portfolio-form">
+                {% csrf_token %}
+
+                <!-- Basic Information -->
+                <div class="row mb-5">
+                    <div class="col-12">
+                        <h5 class="border-bottom pb-3 mb-4" style="color: var(--primary); font-weight: 600;">
+                            <i class="bi bi-info-circle"></i> Basic Information
+                        </h5>
+                    </div>
+                    <div class="col-md-12 mb-4">
+                        <label for="name" class="form-label required">Portfolio Name</label>
+                        <input type="text" class="form-control" id="name" name="name"
+                               value="{{ portfolio.name|default:'' }}"
+                               {% if portfolio %}readonly{% endif %}
+                               required maxlength="20"
+                               pattern="^[a-zA-Z0-9_]+$"
+                               title="Only letters, numbers, and underscores allowed. No spaces or special characters. Max 20 characters."
+                               placeholder="Enter unique portfolio name (max 20 chars)">
+                        <div class="form-text">
+                            <i class="bi bi-info-circle"></i> Alphanumeric only (letters, numbers, underscores). Max 20 characters. Cannot be changed after creation.
+                        </div>
+                    </div>
+                    <div class="col-12 mb-4">
+                        <!-- PORTIARP-7597: description is optional -->
+                        <label for="description" class="form-label">Description</label>
+                        <textarea class="form-control" id="description" name="description" rows="4"
+                                  placeholder="Enter a detailed description of the portfolio">{{ portfolio.description|default:'' }}</textarea>
+                    </div>
+                </div>
+
+                <!-- Financial Information -->
+                <div class="row mb-5">
+                    <div class="col-12">
+                        <h5 class="border-bottom pb-3 mb-4" style="color: var(--primary); font-weight: 600;">
+                            <i class="bi bi-cash-stack"></i> Financial Information
+                        </h5>
+                    </div>
+                    <div class="col-md-4 mb-4">
+                        <label for="currency" class="form-label required">Currency</label>
+                        <select class="form-select" id="currency" name="currency" required>
+                            <option value="">Select Currency</option>
+                            {% for curr in dropdown_options.currencies %}
+                                <option value="{{ curr.code }}" {% if portfolio.currency == curr.code %}selected{% endif %}>
+                                    {{ curr.code }}
+                                </option>
+                            {% endfor %}
+                        </select>
+                        <div class="form-text">
+                            <i class="bi bi-info-circle"></i> Select portfolio currency
+                        </div>
+                    </div>
+                    <!-- Hidden: Cash Balance List removed per PORTIARP-599 -->
+                    <input type="hidden" id="cash_balance_list" name="cash_balance_list" value="{{ portfolio.cash_balance_list|default:'' }}">
+                    <div class="col-md-4 mb-4">
+                        <label for="settlement_ccy" class="form-label">Settlement CCY</label>
+                        <select class="form-select select2-searchable" id="settlement_ccy" name="settlement_ccy">
+                            <option value="">— Select Currency —</option>
+                            {% for curr in dropdown_options.currencies %}
+                            <option value="{{ curr.code }}"
+                                {% if portfolio.settlement_ccy == curr.code %}selected{% endif %}>
+                                {{ curr.code }}
+                            </option>
+                            {% endfor %}
+                        </select>
+                        <div class="form-text text-muted">
+                            <i class="bi bi-info-circle"></i> May differ from portfolio base currency
+                        </div>
+                    </div>
+                    <div class="col-md-4 mb-4">
+                        <label for="branch_code" class="form-label">Branch Code</label>
+                        <input type="text" class="form-control" id="branch_code" name="branch_code"
+                               value="{{ portfolio.branch_code|default:'' }}"
+                               maxlength="20"
+                               placeholder="Branch code">
+                    </div>
+                    <div class="col-md-4 mb-4">
+                        <label for="corp_code" class="form-label">Corp Code</label>
+                        <input type="text" class="form-control" id="corp_code" name="corp_code"
+                               value="{{ portfolio.corp_code|default:'' }}"
+                               pattern="\d{4}" maxlength="4"
+                               title="Must be exactly 4 digits"
+                               placeholder="e.g., 1234">
+                        <div class="form-text">
+                            <i class="bi bi-info-circle"></i> Must be exactly 4 digits
+                        </div>
+                    </div>
+                    <div class="col-md-4 mb-4">
+                        <label for="cost_centre_code" class="form-label">Cost Centre</label>
+                        <input type="text" class="form-control" id="cost_centre_code" name="cost_centre_code"
+                               value="{{ portfolio.cost_centre_code|default:'' }}"
+                               pattern="\d{4}" maxlength="4"
+                               title="Must be exactly 4 digits"
+                               placeholder="e.g., 5678">
+                        <div class="form-text">
+                            <i class="bi bi-info-circle"></i> Must be exactly 4 digits
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Management -->
+                <div class="row mb-5">
+                    <div class="col-12">
+                        <h5 class="border-bottom pb-3 mb-4" style="color: var(--primary); font-weight: 600;">
+                            <i class="bi bi-people"></i> Management
+                        </h5>
+                    </div>
+                    <div class="col-md-4 mb-4">
+                        <!-- PORTIARP-7597: portfolio manager is optional -->
+                        <label for="manager" class="form-label">Portfolio Manager</label>
+                        <select class="form-select" id="manager" name="manager">
+                            <option value="">Select Manager</option>
+                            {% for mgr in dropdown_options.managers %}
+                                <option value="{{ mgr }}" {% if portfolio.manager == mgr %}selected{% endif %}>
+                                    {{ mgr }}
+                                </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-4 mb-4">
+                        <label for="desk_head" class="form-label">Desk Head</label>
+                        <select class="form-select" id="desk_head" name="desk_head">
+                            <option value="">Select Desk Head</option>
+                            {% for dh in dropdown_options.desk_heads %}
+                                <option value="{{ dh }}" {% if portfolio.desk_head == dh %}selected{% endif %}>
+                                    {{ dh }}
+                                </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <!-- Hidden: Portfolio Owner removed per PORTIARP-599 -->
+                    <input type="hidden" id="portfolio_owner" name="portfolio_owner" value="{{ portfolio.portfolio_owner|default:'' }}">
+                    <div class="col-md-4 mb-4">
+                        <label for="portfolio_client" class="form-label">Client</label>
+                        <input type="text" class="form-control" id="portfolio_client" name="portfolio_client"
+                               value="{{ portfolio.portfolio_client|default:'' }}"
+                               maxlength="100"
+                               placeholder="Client name">
+                    </div>
+                    <div class="col-md-4 mb-4">
+                        <label for="country" class="form-label">Country</label>
+                        <select class="form-select" id="country" name="country">
+                            <option value="">Select Country</option>
+                            {% for ctry in dropdown_options.countries %}
+                                <option value="{{ ctry.code }}" {% if portfolio.country == ctry.code %}selected{% endif %}>
+                                    {{ ctry.name }}
+                                </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    {% if portfolio %}
+                    <!-- Closure Date shown only in edit mode per PORTIARP-599 -->
+                    <div class="col-md-4 mb-4">
+                        <label for="closure_date" class="form-label">Closure Date</label>
+                        <input type="date" class="form-control" id="closure_date" name="closure_date"
+                               value="{{ portfolio.closure_date|default:'' }}">
+                        <div class="form-text">
+                            <i class="bi bi-info-circle"></i> Date when the portfolio will be closed
+                        </div>
+                    </div>
+                    {% else %}
+                    <!-- Hidden on create mode per PORTIARP-599 -->
+                    <input type="hidden" id="closure_date" name="closure_date" value="">
+                    {% endif %}
+                </div>
+
+                <!-- Classification -->
+                <div class="row mb-5">
+                    <div class="col-12">
+                        <h5 class="border-bottom pb-3 mb-4" style="color: var(--primary); font-weight: 600;">
+                            <i class="bi bi-tags"></i> Classification
+                        </h5>
+                    </div>
+                    <div class="col-md-12 mb-4">
+                        <label for="entity" class="form-label">Entity</label>
+                        <select class="form-select" id="entity" name="entity">
+                            <option value="">Select Entity</option>
+                            {% for ent in dropdown_options.entities %}
+                                <option value="{{ ent.code }}" {% if portfolio.entity == ent.code %}selected{% endif %}>
+                                    {{ ent.code }} - {{ ent.name }}
+                                </option>
+                            {% endfor %}
+                        </select>
+                        <div class="form-text">
+                            <i class="bi bi-info-circle"></i> Select from Party table
+                        </div>
+                    </div>
+                    <div class="col-md-6 mb-4">
+                        <label for="investment_type" class="form-label">Investment Type</label>
+                        <select class="form-select" id="investment_type" name="investment_type">
+                            <option value="">Select Investment Type</option>
+                            {% for inv_type in dropdown_options.investment_types %}
+                                <option value="{{ inv_type }}" {% if portfolio.investment_type == inv_type %}selected{% endif %}>
+                                    {{ inv_type }}
+                                </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-6 mb-4">
+                        <label for="business_line" class="form-label">Business Unit</label>
+                        <input type="text" class="form-control" id="business_line" name="business_line"
+                               value="{{ portfolio.business_line|default:'' }}"
+                               maxlength="100"
+                               placeholder="Business unit">
+                    </div>
+                </div>
+
+                <!-- Accounting Section -->
+                <div class="row mb-5">
+                    <div class="col-12">
+                        <h5 class="border-bottom pb-3 mb-4" style="color: var(--primary); font-weight: 600;">
+                            <i class="bi bi-calculator"></i> Accounting
+                        </h5>
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label for="accounting_section" class="form-label">Accounting Section</label>
+                        <select class="form-select" id="accounting_section" name="accounting_section">
+                            <option value="">Select Accounting Section</option>
+                            {% for sec in dropdown_options.accounting_sections %}
+                                <option value="{{ sec }}" {% if portfolio.accounting_section == sec %}selected{% endif %}>
+                                    {{ sec }}
+                                </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label for="revaluation_status" class="form-label">Revaluation Status</label>
+                        <select class="form-select" id="revaluation_status" name="revaluation_status">
+                            <option value="">Select Revaluation Status</option>
+                            {% for rv in dropdown_options.revaluation_statuses %}
+                                <option value="{{ rv }}" {% if portfolio.revaluation_status == rv %}selected{% endif %}>
+                                    {{ rv }}
+                                </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Grouping (renamed from Classification) -->
+                <div class="row mb-5">
+                    <div class="col-12">
+                        <h5 class="border-bottom pb-3 mb-4" style="color: var(--primary); font-weight: 600;">
+                            <i class="bi bi-diagram-3"></i> Grouping
+                        </h5>
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label for="account_group" class="form-label">Account Group</label>
+                        <select class="form-select" id="account_group" name="account_group">
+                            <option value="">Select Account Group</option>
+                            {% for ag in dropdown_options.account_groups %}
+                                <option value="{{ ag }}" {% if portfolio.account_group == ag %}selected{% endif %}>
+                                    {{ ag }}
+                                </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label for="portfolio_group" class="form-label">Portfolio Group</label>
+                        <select class="form-select" id="portfolio_group" name="portfolio_group">
+                            <option value="">Select Portfolio Group</option>
+                            {% for pg in dropdown_options.portfolio_groups %}
+                                <option value="{{ pg }}" {% if portfolio.portfolio_group == pg %}selected{% endif %}>
+                                    {{ pg }}
+                                </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label for="report_group" class="form-label">Report Group</label>
+                        <select class="form-select" id="report_group" name="report_group">
+                            <option value="">Select Report Group</option>
+                            {% for rg in dropdown_options.report_groups %}
+                                <option value="{{ rg }}" {% if portfolio.report_group == rg %}selected{% endif %}>
+                                    {{ rg }}
+                                </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label for="entity_group" class="form-label">Entity Group</label>
+                        <select class="form-select" id="entity_group" name="entity_group">
+                            <option value="">Select Entity Group</option>
+                            {% for eg in dropdown_options.entity_groups %}
+                                <option value="{{ eg }}" {% if portfolio.entity_group == eg %}selected{% endif %}>
+                                    {{ eg }}
+                                </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    {% if portfolio %}
+                    {# Status field only visible when editing (read-only, managed by workflow) #}
+                    <div class="col-md-6 mb-3">
+                        <label for="status" class="form-label">Status</label>
+                        <input type="text" class="form-control" id="status"
+                               value="{% if portfolio.status == 'INITIAL' %}Initial{% elif portfolio.status == 'MODIFIED' %}Modified{% elif portfolio.status == 'PENDING_VALIDATION' %}Pending Approval{% elif portfolio.status == 'VALIDATED' %}Active{% elif portfolio.status == 'SETTLED' %}Active{% elif portfolio.status == 'CANCELLED' %}Cancelled{% else %}{{ portfolio.status }}{% endif %}" readonly>
+                        <div class="form-text">
+                            <i class="bi bi-info-circle"></i> Status is managed by the Four-Eyes workflow
+                        </div>
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label for="created_at" class="form-label">Creation Date</label>
+                        <input type="text" class="form-control" id="created_at"
+                               value="{{ portfolio.created_at|default:'-' }}" readonly>
+                        <div class="form-text">
+                            <i class="bi bi-info-circle"></i> Date when the portfolio was created
+                        </div>
+                    </div>
+                    {% else %}
+                    {# Hidden for create - will be set to INITIAL automatically by service layer #}
+                    <div class="col-md-6 mb-3">
+                        <div class="alert alert-info mb-0">
+                            <i class="bi bi-info-circle"></i>
+                            <strong>Workflow:</strong> New portfolios start in <span class="badge badge-secondary">INITIAL</span> status.
+                            Submit for approval to activate the Four-Eyes workflow.
+                        </div>
+                    </div>
+                    {% endif %}
+                </div>
+
+                <!-- Form Actions -->
+                <div class="d-flex gap-3 justify-content-between pt-4 border-top">
+                    <div>
+                        {% if portfolio and portfolio.status == 'INITIAL' or portfolio and portfolio.status == 'MODIFIED' %}
+                            <button type="button" class="btn btn-danger" data-bs-toggle="modal" data-bs-target="#cancelModal">
+                                <i class="bi bi-x-circle"></i> Cancel Portfolio
+                            </button>
+                        {% endif %}
+                    </div>
+                    <div class="d-flex gap-3">
+                        <a href="{% url 'portfolio:list' %}" class="btn btn-outline-secondary btn-lg">
+                            <i class="bi bi-x-circle"></i> Cancel
+                        </a>
+                        <button type="submit" class="btn btn-primary btn-lg">
+                            <i class="bi bi-save"></i> {% if portfolio %}Update{% else %}Create{% endif %} Portfolio
+                        </button>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Info Alert -->
+    <div class="alert alert-info mt-4">
+        <i class="bi bi-info-circle"></i>
+        {% if portfolio %}
+            <strong>Four-Eyes Workflow:</strong> After updating, you can submit the portfolio for validation.
+            Only <span class="badge badge-secondary">INITIAL</span> and <span class="badge badge-info">MODIFIED</span> portfolios can be edited.
+            A different user (Checker) must validate and settle changes.
+        {% else %}
+            <strong>Four-Eyes Workflow:</strong> New portfolios are created in <span class="badge badge-secondary">INITIAL</span> status.
+            After creation, submit for validation. The workflow is:
+            <ol class="mb-0 mt-2">
+                <li>Create → <span class="badge badge-secondary">INITIAL</span></li>
+                <li>Submit → <span class="badge badge-warning">PENDING_VALIDATION</span></li>
+                <li>Checker Validates → <span class="badge badge-primary">VALIDATED</span></li>
+                <li>Checker Settles → <span class="badge badge-success">SETTLED</span> (Active)</li>
+            </ol>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Cancel Portfolio Modal -->
+{% if portfolio and portfolio.status == 'INITIAL' or portfolio and portfolio.status == 'MODIFIED' %}
+<div class="modal fade" id="cancelModal" tabindex="-1" aria-labelledby="cancelModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-danger text-white">
+                <h5 class="modal-title" id="cancelModalLabel">
+                    <i class="bi bi-x-circle"></i> Cancel Portfolio
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <form method="post" action="{% url 'portfolio:cancel' portfolio.name %}">
+                {% csrf_token %}
+                <div class="modal-body">
+                    <div class="alert alert-warning">
+                        <i class="bi bi-exclamation-triangle"></i>
+                        <strong>Warning:</strong> This will cancel portfolio <strong>{{ portfolio.name }}</strong>.
+                    </div>
+                    <div class="mb-3">
+                        <label for="reason" class="form-label">Reason for Cancellation <span class="text-danger">*</span></label>
+                        <textarea class="form-control" id="reason" name="reason" rows="3"
+                                  required placeholder="Enter reason for cancelling this portfolio..."></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                    <button type="submit" class="btn btn-danger">
+                        <i class="bi bi-x-circle"></i> Cancel Portfolio
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+<!-- jQuery (required for Select2) - Local -->
+<script src="{% static 'js/jquery-3.7.1.min.js' %}"></script>
+
+<!-- Select2 JS - Local -->
+<script src="{% static 'js/select2.min.js' %}"></script>
+
+<!-- CIS Trade Hive Select2 Global Initialization -->
+<script src="{% static 'js/select2-init.js' %}"></script>
+
+<script>
+// Initialize Select2 on ALL portfolio form dropdowns
+$(document).ready(function() {
+    // List of ALL dropdown IDs in the portfolio form
+    var allDropdownIds = [
+        // Financial Information
+        'currency',
+        'settlement_ccy',
+        // Management
+        'manager',
+        'desk_head',
+        'country',
+        // Classification
+        'entity',
+        'investment_type',
+        // Accounting
+        'accounting_section',
+        'revaluation_status',
+        // Grouping
+        'account_group',
+        'portfolio_group',
+        'report_group',
+        'entity_group'
+    ];
+
+    // Initialize all dropdowns using the global CISSelect2 utility
+    CISSelect2.initByIds(allDropdownIds);
+
+    // Custom form validation for mandatory fields
+    function validateForm() {
+        var isValid = true;
+        var firstInvalidField = null;
+        var errorMessages = [];
+
+        // Clear previous validation messages
+        $('.validation-error').remove();
+        $('.is-invalid').removeClass('is-invalid');
+        $('.select2-container.is-invalid').removeClass('is-invalid');
+
+        // Check all required input/textarea fields
+        $('form').find('input[required], textarea[required]').each(function() {
+            var $field = $(this);
+            var value = $field.val();
+            var $label = $('label[for="' + $field.attr('id') + '"]');
+            var labelText = $label.text().replace(' *', '').replace('*', '').trim() || $field.attr('name');
+
+            // Check if field is empty
+            if (!value || (typeof value === 'string' && value.trim() === '')) {
+                isValid = false;
+                $field.addClass('is-invalid');
+                errorMessages.push(labelText);
+
+                // Add validation message
+                $field.after('<div class="validation-error text-danger small mt-1"><i class="bi bi-exclamation-circle"></i> ' + labelText + ' is required</div>');
+
+                if (!firstInvalidField) {
+                    firstInvalidField = $field;
+                }
+            }
+        });
+
+        // Check Select2 dropdowns with required attribute
+        $('form').find('select[required]').each(function() {
+            var $field = $(this);
+            var value = $field.val();
+            var $label = $('label[for="' + $field.attr('id') + '"]');
+            var labelText = $label.text().replace(' *', '').replace('*', '').trim() || $field.attr('name');
+
+            if (!value || value === '') {
+                isValid = false;
+                $field.addClass('is-invalid');
+                var $select2Container = $field.next('.select2-container');
+                $select2Container.addClass('is-invalid');
+                errorMessages.push(labelText);
+
+                // Add validation message after Select2 container
+                if ($select2Container.length) {
+                    $select2Container.after('<div class="validation-error text-danger small mt-1"><i class="bi bi-exclamation-circle"></i> ' + labelText + ' is required</div>');
+                } else {
+                    $field.after('<div class="validation-error text-danger small mt-1"><i class="bi bi-exclamation-circle"></i> ' + labelText + ' is required</div>');
+                }
+
+                if (!firstInvalidField) {
+                    firstInvalidField = $field;
+                }
+            }
+        });
+
+        return {
+            isValid: isValid,
+            firstInvalidField: firstInvalidField,
+            errorMessages: errorMessages
+        };
+    }
+
+    $('#portfolio-form').on('submit', function(e) {
+        var result = validateForm();
+
+        if (!result.isValid) {
+            e.preventDefault();
+
+            // Show inline banner instead of native alert
+            var $banner = $('#validation-banner');
+            var $list = $('#validation-banner-list');
+            $list.empty();
+            $.each(result.errorMessages, function(_, msg) {
+                $list.append('<li>' + msg + ' is required</li>');
+            });
+            $banner.removeClass('d-none');
+
+            // Scroll to banner
+            $('html, body').animate({ scrollTop: $banner.offset().top - 80 }, 300);
+
+            if (result.firstInvalidField) {
+                result.firstInvalidField.focus();
+            }
+            return false;
+        }
+
+        // Valid — show operation popup then submit
+        e.preventDefault();
+        $('#validation-banner').addClass('d-none');
+        var operation = '{% if portfolio %}update{% else %}create{% endif %}';
+        var nameVal = $('#name').val() || '{% if portfolio %}{{ portfolio.name|default:"" }}{% endif %}';
+        var entity = nameVal ? ('Portfolio ' + nameVal) : 'Portfolio';
+        submitWithPopup(operation, entity, this);
+    });
+
+    // Clear validation error on field change
+    $('[required]').on('change input', function() {
+        $(this).removeClass('is-invalid');
+        $(this).next('.validation-error').remove();
+        $(this).next('.select2-container').removeClass('is-invalid');
+        $(this).next('.select2-container').next('.validation-error').remove();
+        // Hide banner once user starts correcting
+        if ($('.is-invalid').length === 0) {
+            $('#validation-banner').addClass('d-none');
+        }
+    });
+
+    // Portfolio name validation - alphanumeric only (no special characters)
+    $('#name').on('input', function() {
+        var value = $(this).val();
+        var regex = /^[a-zA-Z0-9_]*$/;
+
+        // Remove any invalid characters as user types
+        if (!regex.test(value)) {
+            // Remove invalid characters
+            var cleanValue = value.replace(/[^a-zA-Z0-9_]/g, '');
+            $(this).val(cleanValue);
+
+            // Show warning
+            if (!$(this).next('.alphanumeric-warning').length) {
+                $(this).after('<div class="alphanumeric-warning text-warning small mt-1"><i class="bi bi-exclamation-triangle"></i> Only letters, numbers, and underscores allowed. Invalid characters removed.</div>');
+                setTimeout(function() {
+                    $('.alphanumeric-warning').fadeOut(function() { $(this).remove(); });
+                }, 3000);
+            }
+        }
+    });
+
+    // Prevent paste of invalid characters
+    $('#name').on('paste', function(e) {
+        var $input = $(this);
+        setTimeout(function() {
+            var value = $input.val();
+            var cleanValue = value.replace(/[^a-zA-Z0-9_]/g, '');
+            if (value !== cleanValue) {
+                $input.val(cleanValue);
+                if (!$input.next('.alphanumeric-warning').length) {
+                    $input.after('<div class="alphanumeric-warning text-warning small mt-1"><i class="bi bi-exclamation-triangle"></i> Invalid characters removed from pasted text.</div>');
+                    setTimeout(function() {
+                        $('.alphanumeric-warning').fadeOut(function() { $(this).remove(); });
+                    }, 3000);
+                }
+            }
+        }, 10);
+    });
+});
+</script>
+{% endblock %}

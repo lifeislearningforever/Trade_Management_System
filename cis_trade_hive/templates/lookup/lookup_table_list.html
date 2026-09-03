@@ -1,0 +1,149 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Lookup Tables - Configuration{% endblock %}
+
+{% block breadcrumb %}
+    <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
+    <li class="breadcrumb-item">Configuration</li>
+    <li class="breadcrumb-item active">Lookup Tables</li>
+{% endblock %}
+
+{% block content %}
+<div class="lookup-list-container">
+    <!-- Page Header -->
+    <div class="content-header d-flex justify-content-between align-items-start">
+        <div>
+            <h1 class="content-title">
+                <i class="bi bi-gear text-primary"></i> Lookup Tables
+            </h1>
+            <p class="content-subtitle">Configure lookup/reference data tables for dropdowns and reports</p>
+        </div>
+        <a href="{% url 'dashboard' %}" class="btn btn-outline-secondary">
+            <i class="bi bi-arrow-left"></i> Back to Dashboard
+        </a>
+    </div>
+
+    <!-- Summary Cards -->
+    <div class="row mb-4">
+        <div class="col-md-4">
+            <div class="card bg-primary text-white">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <h6 class="card-subtitle mb-1 text-white-50">Total Tables</h6>
+                            <h2 class="card-title mb-0">{{ total_count }}</h2>
+                        </div>
+                        <i class="bi bi-table" style="font-size: 2.5rem; opacity: 0.5;"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card bg-success text-white">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <h6 class="card-subtitle mb-1 text-white-50">Total Rows</h6>
+                            <h2 class="card-title mb-0">
+                                {% with total_rows=0 %}
+                                    {% for table in tables %}
+                                        {% if table.row_count %}{{ table.row_count|add:total_rows }}{% endif %}
+                                    {% endfor %}
+                                {% endwith %}
+                                {{ tables|length }}+
+                            </h2>
+                        </div>
+                        <i class="bi bi-list-ul" style="font-size: 2.5rem; opacity: 0.5;"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card bg-info text-white">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <h6 class="card-subtitle mb-1 text-white-50">Database</h6>
+                            <h2 class="card-title mb-0">gmp_cis</h2>
+                        </div>
+                        <i class="bi bi-database" style="font-size: 2.5rem; opacity: 0.5;"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Lookup Tables Grid -->
+    <div class="card">
+        <div class="card-header">
+            <h5 class="card-title mb-0">
+                <i class="bi bi-collection"></i> Available Lookup Tables
+                <span class="badge badge-primary ms-2">{{ total_count }} tables</span>
+            </h5>
+        </div>
+        <div class="card-body">
+            {% if tables %}
+                <div class="row">
+                    {% for table in tables %}
+                    <div class="col-md-6 col-lg-4 mb-3">
+                        <div class="card h-100 lookup-table-card" style="position:relative;">
+                            <!-- Stretch link covers the entire card body for easy clicking -->
+                            <a href="{% url 'lookup:table_detail' table.table_name %}" class="stretched-link" aria-label="Manage {{ table.display_name }}"></a>
+                            <div class="card-body">
+                                <h5 class="card-title">
+                                    <i class="bi bi-table text-primary"></i>
+                                    {{ table.display_name }}
+                                </h5>
+                                <p class="card-text text-muted small">
+                                    <code>{{ table.table_name }}</code>
+                                </p>
+                                <div class="d-flex justify-content-between align-items-center mb-2">
+                                    <span class="badge badge-info">{{ table.row_count }} rows</span>
+                                    <span class="badge badge-secondary">{{ table.columns|length }} columns</span>
+                                </div>
+                                <p class="card-text small text-muted">
+                                    PK: <code>{{ table.pk_column }}</code>
+                                </p>
+                            </div>
+                            <div class="card-footer bg-transparent" style="position:relative; z-index:2;">
+                                <a href="{% url 'lookup:table_detail' table.table_name %}" class="btn btn-sm btn-primary">
+                                    <i class="bi bi-pencil-square"></i> Manage
+                                </a>
+                                <a href="{% url 'lookup:table_detail' table.table_name %}?export=csv" class="btn btn-sm btn-outline-success">
+                                    <i class="bi bi-download"></i> CSV
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <div class="text-center py-5" style="color: var(--gray-500);">
+                    <i class="bi bi-database-x" style="font-size: 3rem; opacity: 0.3;"></i>
+                    <p class="mt-3 mb-0">No lookup tables found</p>
+                    <p class="text-muted">Tables with '_lut' in their name will appear here</p>
+                </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Info Alert -->
+    <div class="alert alert-info mt-4">
+        <i class="bi bi-info-circle"></i>
+        <strong>Note:</strong> This page automatically discovers all Kudu tables containing '_lut' in their name.
+        Users can add, edit, or delete rows which are used in dropdown fields and report generation logic.
+    </div>
+</div>
+
+<style>
+.lookup-table-card {
+    transition: transform 0.2s, box-shadow 0.2s;
+    border: 1px solid var(--gray-200);
+}
+.lookup-table-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+}
+</style>
+{% endblock %}
