@@ -686,6 +686,68 @@ class PendingApprovalsViewsTestCase(TestCase):
         self.assertEqual(response.context['pending_count'], 1)
 
     @patch('trade.views.trade_kudu_repository')
+    def test_pending_validation_shows_cancellation_actions_for_cancel_pending_row(self, mock_repo):
+        """
+        Regression: get_pending_validation_trades() deliberately includes
+        MODIFIED+is_deleted=true+cancel_reason rows (pending cancellations)
+        alongside normal INITIAL/MODIFIED rows, but the template only ever
+        rendered a "Validate" button regardless of row type -- wrong action
+        for a cancel-pending row (Validate posts to trade_validate(), not the
+        cancellation workflow). It must render Approve/Reject Cancellation
+        for those rows instead, and hide them from the user who requested
+        the cancellation.
+        """
+        mock_repo.get_pending_validation_trades.return_value = [
+            {
+                'trade_id': 1, 'deal_number': 'DEAL-1', 'status': 'MODIFIED',
+                'is_deleted': True, 'cancel_reason': 'wrong price',
+                'cancelled_by': 'othermaker', 'created_by': 'testuser',
+                'src_system': 'CIS',
+            },
+        ]
+        mock_repo.get_trade_statistics.return_value = {'pending_validation': 1, 'pending_settlement': 0}
+
+        response = self.client.get(reverse('trade:pending_validation'))
+
+        content = response.content.decode()
+        self.assertIn('Approve Cancellation', content)
+        self.assertIn('Reject Cancellation', content)
+        self.assertNotIn('showValidateModal(1,', content)
+
+    @patch('trade.views.trade_kudu_repository')
+    def test_pending_validation_hides_cancellation_actions_from_requester(self, mock_repo):
+        mock_repo.get_pending_validation_trades.return_value = [
+            {
+                'trade_id': 1, 'deal_number': 'DEAL-1', 'status': 'MODIFIED',
+                'is_deleted': True, 'cancel_reason': 'wrong price',
+                'cancelled_by': 'testuser', 'created_by': 'testuser',
+                'src_system': 'CIS',
+            },
+        ]
+        mock_repo.get_trade_statistics.return_value = {'pending_validation': 1, 'pending_settlement': 0}
+
+        response = self.client.get(reverse('trade:pending_validation'))
+
+        content = response.content.decode()
+        self.assertNotIn('showApproveCancellationModal(1,', content)
+        self.assertNotIn('showRejectCancellationModal(1,', content)
+
+    @patch('trade.views.trade_kudu_repository')
+    def test_pending_validation_hides_validate_from_own_trade(self, mock_repo):
+        mock_repo.get_pending_validation_trades.return_value = [
+            {
+                'trade_id': 1, 'deal_number': 'DEAL-1', 'status': 'INITIAL',
+                'is_deleted': False, 'created_by': 'testuser', 'src_system': 'CIS',
+            },
+        ]
+        mock_repo.get_trade_statistics.return_value = {'pending_validation': 1, 'pending_settlement': 0}
+
+        response = self.client.get(reverse('trade:pending_validation'))
+
+        content = response.content.decode()
+        self.assertNotIn('showValidateModal(1,', content)
+
+    @patch('trade.views.trade_kudu_repository')
     def test_pending_settlement_view(self, mock_repo):
         """Test pending settlement list view"""
         mock_repo.get_pending_settlement_trades.return_value = [
