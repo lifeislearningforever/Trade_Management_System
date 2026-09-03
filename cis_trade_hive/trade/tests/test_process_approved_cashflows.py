@@ -1,3 +1,4 @@
+import re
 from decimal import Decimal
 from unittest.mock import patch
 
@@ -199,6 +200,60 @@ class TestProcessApprovedCashflowsSeedPositions:
         assert success is True
         write_sql.assert_not_called()  # must not touch cis_trade_position at all
         sync_mock.assert_called_once()
+
+    def test_sync_to_golden_position_reuses_existing_position_id(self):
+        """
+        Regression: cis_position's PRIMARY KEY is position_id alone. An UPSERT
+        keyed on a freshly-computed hash instead of the existing row's own
+        position_id (e.g. a timestamp-based id from refresh_positions.py's
+        carry-forward writer) inserts a brand-new row rather than updating the
+        one just found — the update becomes invisible on the position_id the
+        user is actually watching. This was the "reprocessed the cash flow,
+        TRADED still not showing" symptom for UOBS_BCHAIN_FVE / UQ-UOB-102 CH,
+        whose existing golden row has position_id=1788335199514 (a
+        timestamp+random id, not the position_id_service hash).
+        """
+        existing_row = {
+            'position_id': 1788335199514,
+            'version_id': 1788334199514,
+            'src_system': 'CIS',
+            'position_basis': 'TRADED',
+            'quantity': 1679,
+            'average_cost_fc': 1445.04921767,
+            'cost_fc': 2426237.64,
+        }
+        current = {'position_basis': 'TRADED', 'quantity': 1679}
+
+        with patch(
+            'trade.management.commands.process_approved_cashflows.impala_manager.execute_query',
+            return_value=[existing_row],
+        ), patch(
+            'trade.management.commands.process_approved_cashflows.impala_manager.execute_write',
+            return_value=True,
+        ) as write_sql:
+            self.command._sync_to_golden_position(
+                portfolio='UOBS_BCHAIN_FVE',
+                security='UQ-UOB-102 CH',
+                position_date='2026-03-16',
+                cf_type='RETURN_OF_CAPITAL',
+                current=current,
+                overrides={'total_cost_fc': 2400000.0},
+                cf_id=1,
+                cf_number='CF-20260902-00001',
+                cf_amount_fc=10.0,
+                cf_amount_lc=13.0,
+                fc_dp=2,
+                lc_dp=2,
+                src_system='CIS',
+                run_type='EOD',
+            )
+
+        sql = write_sql.call_args.args[0]
+        values_clause = sql.split('VALUES', 1)[1]
+        leading_ids = re.findall(r'\d+', values_clause)[:2]
+        assert leading_ids == ['1788335199514', '1788335199514'], (
+            f'expected UPSERT to reuse the existing row\'s position_id, got {leading_ids}'
+        )
 
     def test_apply_to_position_return_of_capital_updates_settled_and_traded(self):
         positions = [

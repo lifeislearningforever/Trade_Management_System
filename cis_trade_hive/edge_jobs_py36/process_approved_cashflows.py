@@ -1066,6 +1066,23 @@ class Command(BaseCommand):
                 source_table  = row.get('source_table')
                 effective_src = row.get('src_system') or src_system
                 pos_basis     = row.get('position_basis') or 'SETTLED'
+                # cis_position's PRIMARY KEY is position_id alone -- UPSERT only
+                # updates in place if we supply the SAME position_id the existing
+                # row already has. Some writers (refresh_positions.py's EOD/
+                # carry-forward inserts) assign position_id as a timestamp+random
+                # value rather than the position_id_service hash, so recomputing
+                # the hash here would silently spawn a brand-new row (with a
+                # second is_latest=true) instead of updating the one we just
+                # found -- exactly the "cash flow reprocessed, TRADED still not
+                # showing" symptom, since the visible row's own position_id
+                # never changed.
+                new_position_id = row.get('position_id') or _calc_position_id(
+                    portfolio=portfolio,
+                    security_label=security,
+                    position_basis=pos_basis,
+                    position_date=position_date,
+                    src_system=effective_src,
+                )
             else:
                 row           = {}
                 isin          = current.get('isin')
@@ -1073,16 +1090,16 @@ class Command(BaseCommand):
 
                 effective_src = src_system
                 pos_basis     = current.get('position_basis') or 'SETTLED'
-
-            # Natural key hash — uses same MD5-based formula as position_id_service
-            # (position_service, upload_service, refresh_positions all use this)
-            new_position_id = _calc_position_id(
-                portfolio=portfolio,
-                security_label=security,
-                position_basis=pos_basis,
-                position_date=position_date,
-                src_system=effective_src,
-            )
+                # No existing row -- fresh insert, so the deterministic natural-key
+                # hash (same formula position_id_service/upload_service/
+                # refresh_positions use) is the right choice.
+                new_position_id = _calc_position_id(
+                    portfolio=portfolio,
+                    security_label=security,
+                    position_basis=pos_basis,
+                    position_date=position_date,
+                    src_system=effective_src,
+                )
             logger.info(
                 f'[GOLDEN] position_id={new_position_id} for '
                 f'{portfolio}/{security}/{pos_basis}/{position_date}/{effective_src}'
