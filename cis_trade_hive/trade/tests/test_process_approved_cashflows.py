@@ -75,6 +75,40 @@ class TestProcessApprovedCashflowsSeedPositions:
         overrides = write_mock.call_args.args[5]
         assert overrides == {'pipeline_fc': -25.0, 'pipeline_lc': -30.0}
 
+    def test_apply_to_position_seeds_ytd_realise_position_when_missing(self):
+        """
+        YTD_REALISE accumulates realized_pnl_fc/lc via _accumulate_field,
+        which has no quantity gate (unlike _reduce_avp for RETURN_OF_CAPITAL/
+        CAPITAL_DISTRIBUTION), so seeding a zero-quantity position for it is
+        mechanically identical to UNCALL_COMMITMENT/PIPELINE.
+        """
+        with patch.object(self.command, '_get_current_positions', return_value=[]), \
+             patch.object(self.command, '_get_security_currency', return_value='USD'), \
+             patch.object(self.command, '_get_portfolio_currency', return_value='SGD'), \
+             patch.object(self.command, '_get_currency_dp', return_value=2), \
+             patch.object(self.command, '_write_new_position_version', return_value=True) as write_mock:
+            success, _ = self.command._apply_to_position(
+                cf=self.cash_flow,
+                cf_type='YTD_REALISE',
+                portfolio='PORT-1',
+                security='SEC-1',
+                amount_fc=Decimal('50'),
+                amount_lc=Decimal('65'),
+                send_receive='RECEIVE',
+                payment_date='2026-08-15',
+                dry_run=False,
+                run_type='EOD',
+                position_date='2026-08-15',
+            )
+
+        assert success is True
+        current, portfolio, security, position_date, cf_type, overrides = write_mock.call_args.args[:6]
+        assert current['quantity'] == 0
+        assert current['position_basis'] == 'SETTLED'
+        # RECEIVE = -1 per the global _sign() convention (same as the PIPELINE
+        # seed test above).
+        assert overrides == {'realized_pnl_fc': -50.0, 'realized_pnl_lc': -65.0}
+
     def test_apply_to_position_keeps_non_seed_types_as_no_position(self):
         with patch.object(self.command, '_get_current_positions', return_value=[]):
             success, message = self.command._apply_to_position(

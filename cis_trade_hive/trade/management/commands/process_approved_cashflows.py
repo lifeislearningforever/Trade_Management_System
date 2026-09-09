@@ -45,9 +45,9 @@ record so re-runs on the same date skip already-processed records.
 Position lookup: always the current is_latest=true row (cis_trade_position
 for CIS sources, cis_position for non-CIS) — this is the base every run
 increases/decreases the cost from, regardless of what position_type that
-latest row happens to be. If no current row exists, UNCALL_COMMITMENT and
-PIPELINE seed a zero-quantity SETTLED CIS position for the run date and then
-apply the cash flow to that first version.
+latest row happens to be. If no current row exists, UNCALL_COMMITMENT,
+PIPELINE, and YTD_REALISE seed a zero-quantity SETTLED CIS position for the
+run date and then apply the cash flow to that first version.
 
 average_cost precision: average_cost_fc/lc are a per-unit price, not a
 currency amount, and are always written at AVP_PRECISION (8dp) — never
@@ -108,7 +108,7 @@ CASH_FLOW_TABLE = 'cis_cash_flow'
 PRECISION = Decimal('0.00000001')
 DEFAULT_DP = 2
 AVP_PRECISION = 8  # average cost is price-per-unit, not an amount
-SEED_POSITION_CF_TYPES = {'UNCALL_COMMITMENT', 'PIPELINE'}
+SEED_POSITION_CF_TYPES = {'UNCALL_COMMITMENT', 'PIPELINE', 'YTD_REALISE'}
 
 
 def _escape(value: str) -> str:
