@@ -47,6 +47,26 @@ class FileValidationResultTestCase(TestCase):
 
 
 # ===========================================================================
+# SQL helpers
+# ===========================================================================
+
+class BuildAverageCostSqlTestCase(TestCase):
+
+    def test_prefers_cost_divided_by_quantity(self):
+        from upload.services.upload_service import build_average_cost_sql
+        sql = build_average_cost_sql('s.final_quantity', 's.cost_fc', 's.average_cost')
+        self.assertIn("CAST(s.cost_fc AS DECIMAL(30,8)) / CAST(s.final_quantity AS DECIMAL(30,8))", sql)
+        self.assertIn("WHEN s.average_cost IS NOT NULL", sql)
+        self.assertIn("ELSE CAST(0 AS DECIMAL(30,8))", sql)
+
+    def test_allows_null_fallback_expression(self):
+        from upload.services.upload_service import build_average_cost_sql
+        sql = build_average_cost_sql('final_quantity', 'cost_lc', 'NULL')
+        self.assertIn("WHEN NULL IS NOT NULL", sql)
+        self.assertIn("CAST(cost_lc AS DECIMAL(30,8)) / CAST(final_quantity AS DECIMAL(30,8))", sql)
+
+
+# ===========================================================================
 # FileValidationService — _get_extension
 # ===========================================================================
 
