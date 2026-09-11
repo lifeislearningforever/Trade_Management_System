@@ -95,3 +95,49 @@ class TestRefreshPositions:
         )
 
         assert result == 'skipped'
+
+    def test_process_position_liqn_accounting_section_zeroes_unrealized_pnl(self):
+        position = {
+            'position_id': 1,
+            'portfolio': 'PORT-1',
+            'security_label': 'SEC-1',
+            'quantity': Decimal('10'),
+            'cost_fc': Decimal('100'),
+            'cost_lc': Decimal('100'),
+            'provision_fc': Decimal('0'),
+            'provision_lc': Decimal('0'),
+            'average_cost_fc': Decimal('10'),
+            'average_cost_lc': Decimal('10'),
+            'position_date': '2026-08-16',
+        }
+        ref = {
+            'port_info': {
+                'PORT-1': {
+                    'currency': 'USD',
+                    'revaluation_status': 'NON-REVALUED',
+                    'accounting_section': 'LIQN',
+                }
+            },
+            'sec_ccy': {'SEC-1': 'USD'},
+            'equity_method': {'PORT-1': False},
+            'prices': {'SEC-1': Decimal('20')},
+            'fx_rates': {},
+            'fx_rate_dates': {},
+            'currency_dp': {'USD': 2},
+        }
+        insert_rows = []
+
+        result = self.command._process_position(
+            position=position,
+            dry_run=False,
+            run_date='2026-08-16',
+            ref=ref,
+            insert_rows=insert_rows,
+            ams_no_reval=False,
+            run_type='EOD',
+        )
+
+        assert result == 'updated'
+        assert insert_rows[0]['market_value_fc'] == Decimal('200.00')
+        assert insert_rows[0]['unrealized_pnl_fc'] == Decimal('0')
+        assert insert_rows[0]['unrealized_pnl_lc'] == Decimal('0')
