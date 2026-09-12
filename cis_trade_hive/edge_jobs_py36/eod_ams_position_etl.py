@@ -171,6 +171,26 @@ def safe_decimal(col: str, dec_type: str) -> str:
     )
 
 
+def build_average_cost_sql(
+    quantity_expr: str,
+    cost_expr: str,
+    fallback_expr: str,
+    dec_type: str = 'DECIMAL(30,8)',
+) -> str:
+    return f"""
+            CASE
+                WHEN CAST({quantity_expr} AS {dec_type}) > 0
+                     AND {cost_expr} IS NOT NULL
+                     AND CAST({cost_expr} AS {dec_type}) > 0
+                    THEN CAST(
+                        CAST({cost_expr} AS {dec_type}) / CAST({quantity_expr} AS {dec_type})
+                    AS {dec_type})
+                WHEN {fallback_expr} IS NOT NULL
+                    THEN CAST({fallback_expr} AS {dec_type})
+                ELSE CAST(0 AS {dec_type})
+            END"""
+
+
 def normalize_ticker_suffix(col: str) -> str:
     """Generate SQL that rewrites ISO country suffixes to Bloomberg exchange suffixes.
 
@@ -1834,7 +1854,11 @@ def run_etl_for_table(table: str, processing_date: str, dry_run: bool,
             src_system,
             processing_date,
             CAST(final_quantity          AS DECIMAL(30,8))  AS quantity,
-            CAST(average_cost            AS DECIMAL(30,8))  AS average_cost_fc,
+            {build_average_cost_sql(
+                'final_quantity',
+                'cost_fc',
+                'average_cost',
+            )}                                            AS average_cost_fc,
             CAST(cost_fc                 AS DECIMAL(30,8))  AS cost_fc,
             CAST(final_market_value_fc   AS DECIMAL(30,8))  AS market_value_fc,
             CAST(final_net_book_value_fc AS DECIMAL(30,8))  AS net_book_value_fc,
@@ -1854,7 +1878,11 @@ def run_etl_for_table(table: str, processing_date: str, dry_run: bool,
             CAST(0 AS DECIMAL(30,8))                        AS realized_pnl_fc,
             CAST(0 AS DECIMAL(30,8))                        AS realized_pnl_lc,
             COALESCE(final_isin, isin)                      AS isin,
-            CAST(0 AS DECIMAL(30,8))                        AS average_cost_lc,
+            {build_average_cost_sql(
+                'final_quantity',
+                'cost_lc',
+                'NULL',
+            )}                                            AS average_cost_lc,
             source_table                                    AS source_table,
             from_unixtime(unix_timestamp(), 'yyyy-MM-dd HH:mm:ss') AS processing_timestamp,
             CAST(0 AS DECIMAL(30,8))                        AS uncall_fc,
