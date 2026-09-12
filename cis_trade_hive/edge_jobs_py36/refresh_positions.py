@@ -544,6 +544,9 @@ class Command(BaseCommand):
         reval_status = (port_info.get('revaluation_status') or '').strip().upper()
         sec_ccy      = ref['sec_ccy'].get(security)
         is_equity    = ref['equity_method'].get(portfolio, False)
+        accounting_section = (
+            ref['port_info'].get(portfolio, {}).get('accounting_section') or ''
+        ).strip().upper()
         latest_price = ref['prices'].get(security)
         fx_pair      = f'{sec_ccy}-{port_ccy}' if sec_ccy and port_ccy and sec_ccy != port_ccy else None
         fx_rate      = ref['fx_rates'].get(fx_pair, Decimal('1')) if fx_pair else Decimal('1')
@@ -614,7 +617,7 @@ class Command(BaseCommand):
         market_value_lc = round(market_value_fc * fx_rate, lc_dp)
 
         # Unrealized P&L
-        if is_equity:
+        if is_equity or accounting_section == 'LIQN':
             unrealized_pnl_fc = Decimal('0')
             unrealized_pnl_lc = Decimal('0')
         else:
@@ -703,7 +706,7 @@ class Command(BaseCommand):
                            is SUBSIDIARY CO / ASSOCIATED CO / RESTRUCTURED EQUITY-NEW —
                            equity-method treatment is a portfolio-level attribute, not
                            a per-security one)
-          port_info      : {portfolio: {currency, revaluation_status}}
+          port_info      : {portfolio: {currency, revaluation_status, accounting_section}}
           prices         : {security_label: Decimal}  (latest closing price)
           fx_rates       : {'SEC-PORT': Decimal}  (spot_rate_d)
           currency_dp    : {iso_code: int}  (decimal places)
@@ -742,10 +745,10 @@ class Command(BaseCommand):
             for r in rows:
                 ref['sec_ccy'][r.get('security_name')] = r.get('currency_code')
 
-        # 2. Portfolios: currency + revaluation_status + investment_type
+        # 2. Portfolios: currency + revaluation_status + investment_type + accounting_section
         if portfolios:
             rows = impala_manager.execute_query(
-                f"SELECT name, currency, revaluation_status, investment_type "
+                f"SELECT name, currency, revaluation_status, investment_type, accounting_section "
                 f"FROM {DATABASE}.cis_portfolio "
                 f"WHERE name IN ({_placeholders(portfolios)})",
                 portfolios,
@@ -756,6 +759,7 @@ class Command(BaseCommand):
                 ref['port_info'][name] = {
                     'currency': r.get('currency'),
                     'revaluation_status': r.get('revaluation_status'),
+                    'accounting_section': r.get('accounting_section'),
                 }
                 inv = (r.get('investment_type') or '').upper()
                 ref['equity_method'][name] = inv in EQUITY_METHOD_INVESTMENT_TYPES

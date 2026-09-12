@@ -28,6 +28,27 @@ from ..repositories.datasource_repository import datasource_repository
 logger = logging.getLogger('upload')
 
 
+def build_average_cost_sql(
+    quantity_expr: str,
+    cost_expr: str,
+    fallback_expr: str,
+    dec_type: str = 'DECIMAL(30,8)',
+) -> str:
+    """Return SQL to derive average cost from cost / quantity when available."""
+    return f"""
+                    CASE
+                        WHEN CAST({quantity_expr} AS {dec_type}) > 0
+                             AND {cost_expr} IS NOT NULL
+                             AND CAST({cost_expr} AS {dec_type}) > 0
+                            THEN CAST(
+                                CAST({cost_expr} AS {dec_type}) / CAST({quantity_expr} AS {dec_type})
+                            AS {dec_type})
+                        WHEN {fallback_expr} IS NOT NULL
+                            THEN CAST({fallback_expr} AS {dec_type})
+                        ELSE CAST(0 AS {dec_type})
+                    END"""
+
+
 # ---------------------------------------------------------------------------
 # ETL cancellation registry
 # ---------------------------------------------------------------------------
@@ -5466,7 +5487,11 @@ class UploadService:
                     s.src_system,
                     s.processing_date,
                     CAST(s.final_quantity          AS DECIMAL(30,8)) AS quantity,
-                    CAST(s.average_cost            AS DECIMAL(30,8)) AS average_cost_fc,
+                    {build_average_cost_sql(
+                        "s.final_quantity",
+                        "s.cost_fc",
+                        "s.average_cost",
+                    )}                                           AS average_cost_fc,
                     CAST(s.cost_fc                 AS DECIMAL(30,8)) AS cost_fc,
                     CAST(s.final_market_value_fc   AS DECIMAL(30,8)) AS market_value_fc,
                     CAST(s.final_net_book_value_fc AS DECIMAL(30,8)) AS net_book_value_fc,
@@ -5483,18 +5508,11 @@ class UploadService:
                     COALESCE(ep.realized_pnl_fc, CAST(0 AS DECIMAL(30,8))) AS realized_pnl_fc,
                     COALESCE(ep.realized_pnl_lc, CAST(0 AS DECIMAL(30,8))) AS realized_pnl_lc,
                     COALESCE(s.final_isin, s.isin)                   AS isin,
-                    -- average_cost_lc: recalculate from cost_lc / quantity; fallback to existing
-                    CASE
-                        WHEN CAST(s.final_quantity AS DECIMAL(30,8)) > 0
-                             AND s.cost_lc IS NOT NULL
-                             AND CAST(s.cost_lc AS DECIMAL(30,8)) > 0
-                            THEN CAST(
-                                CAST(s.cost_lc AS DECIMAL(30,8)) / CAST(s.final_quantity AS DECIMAL(30,8))
-                            AS DECIMAL(30,8))
-                        WHEN ep.average_cost_lc IS NOT NULL
-                            THEN CAST(ep.average_cost_lc AS DECIMAL(30,8))
-                        ELSE CAST(0 AS DECIMAL(30,8))
-                    END                                              AS average_cost_lc,
+                    {build_average_cost_sql(
+                        "s.final_quantity",
+                        "s.cost_lc",
+                        "ep.average_cost_lc",
+                    )}                                           AS average_cost_lc,
                     s.source_table                                   AS source_table,
                     from_unixtime(unix_timestamp(), 'yyyy-MM-dd HH:mm:ss') AS processing_timestamp,
                     COALESCE(ep.uncall_fc,   CAST(0 AS DECIMAL(30,8))) AS uncall_fc,
