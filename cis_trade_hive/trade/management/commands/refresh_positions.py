@@ -544,8 +544,22 @@ class Command(BaseCommand):
         latest_price = ref['prices'].get(security)
         fx_pair      = f'{sec_ccy}-{port_ccy}' if sec_ccy and port_ccy and sec_ccy != port_ccy else None
         fx_rate      = ref['fx_rates'].get(fx_pair, Decimal('1')) if fx_pair else Decimal('1')
-        fc_dp        = ref['currency_dp'].get(sec_ccy, 2)
-        lc_dp        = ref['currency_dp'].get(port_ccy, 2)
+        # AMS_STREET is the one source whose values are meant to match a
+        # 2dp currency display (its feed IS the official reporting figure).
+        # Every other source (USER_UPLOAD, GMP, CIS, ...) should carry its
+        # real stored precision through untouched -- rounding cost_fc/
+        # market_value_fc/etc. to 2dp for those was silently truncating
+        # values with genuine precision beyond 2dp (e.g. 44.87684000
+        # written back as 44.88000000). Applies to every run type
+        # (EOD/CORR/INT), independent of --ams-no-reval, which is a
+        # separate AMS_STREET/SETTLED-only "skip recalculation entirely"
+        # switch.
+        if position.get('src_system') == 'AMS_STREET':
+            fc_dp = ref['currency_dp'].get(sec_ccy, 2)
+            lc_dp = ref['currency_dp'].get(port_ccy, 2)
+        else:
+            fc_dp = AVP_PRECISION
+            lc_dp = AVP_PRECISION
 
         # cost_lc / provision_lc rules (SA, req 4) -- same FX treatment for both:
         #   NON-REVAL: always carry forward the as-traded LC (never recompute)
@@ -641,8 +655,16 @@ class Command(BaseCommand):
 
         sec_ccy  = ref['sec_ccy'].get(security)
         port_ccy = ref['port_info'].get(portfolio, {}).get('currency')
-        fc_dp    = ref['currency_dp'].get(sec_ccy, 2)
-        lc_dp    = ref['currency_dp'].get(port_ccy, 2)
+        # "Copy forward exactly as stored" means exactly that -- _build_value
+        # rounds every fc/lc field to fc_dp/lc_dp before writing, which for a
+        # normal EOD/CORR/INT row is the currency's 2dp display precision.
+        # Applying that same 2dp rounding here would silently truncate a
+        # source value's real stored precision (e.g. 44.87684000 -> 44.88),
+        # which is exactly what "unchanged" is not supposed to do. Use
+        # AVP_PRECISION instead so the round() calls in _build_value are a
+        # no-op for any value already within cis_position's DECIMAL(20,8).
+        fc_dp    = AVP_PRECISION
+        lc_dp    = AVP_PRECISION
 
         market_value_fc = Decimal(str(position.get('market_value_fc') or 0))
         price_dec = (market_value_fc / qty) if qty else Decimal('0')

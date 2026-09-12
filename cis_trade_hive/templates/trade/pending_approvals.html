@@ -117,11 +117,30 @@
                                             <i class="bi bi-eye"></i>
                                         </a>
                                         {% if view_type == 'validation' %}
-                                            <button type="button" class="btn btn-sm btn-success"
-                                                    onclick="showValidateModal({{ trade.trade_id }}, '{{ trade.deal_number }}')"
-                                                    title="Validate">
-                                                <i class="bi bi-check-circle"></i>
-                                            </button>
+                                            {% if trade.is_deleted %}
+                                                {# Cancel-pending rows (this list also includes MODIFIED+is_deleted=true+
+                                                   cancel_reason, per get_pending_validation_trades) need the cancellation
+                                                   approve/reject actions, not Validate -- posting Validate here would hit
+                                                   trade_validate(), which isn't the workflow for a pending cancellation. #}
+                                                {% if trade.cancelled_by != request.session.user_login %}
+                                                    <button type="button" class="btn btn-sm btn-success"
+                                                            onclick="showApproveCancellationModal({{ trade.trade_id }}, '{{ trade.deal_number }}')"
+                                                            title="Approve Cancellation">
+                                                        <i class="bi bi-check-circle"></i>
+                                                    </button>
+                                                    <button type="button" class="btn btn-sm btn-danger"
+                                                            onclick="showRejectCancellationModal({{ trade.trade_id }}, '{{ trade.deal_number }}')"
+                                                            title="Reject Cancellation">
+                                                        <i class="bi bi-x-circle"></i>
+                                                    </button>
+                                                {% endif %}
+                                            {% elif trade.created_by != request.session.user_login %}
+                                                <button type="button" class="btn btn-sm btn-success"
+                                                        onclick="showValidateModal({{ trade.trade_id }}, '{{ trade.deal_number }}')"
+                                                        title="Validate">
+                                                    <i class="bi bi-check-circle"></i>
+                                                </button>
+                                            {% endif %}
                                         {% else %}
                                             <button type="button" class="btn btn-sm btn-success"
                                                     onclick="showSettleModal({{ trade.trade_id }}, '{{ trade.deal_number }}')"
@@ -186,6 +205,58 @@
     </div>
 </div>
 
+<!-- Approve Cancellation Modal -->
+<div class="modal fade" id="approveCancellationModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="post" id="approveCancellationForm">
+                {% csrf_token %}
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="bi bi-check-circle text-success"></i> Approve Cancellation</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p>Approving will permanently cancel trade: <strong id="approveCancellationDealNumber"></strong> and reverse its AVP position.</p>
+                    <div class="mb-3">
+                        <label class="form-label">Comments (optional)</label>
+                        <textarea class="form-control" name="comments" rows="2" placeholder="Approval comments..."></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                    <button type="submit" class="btn btn-success">Approve Cancellation</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Reject Cancellation Modal -->
+<div class="modal fade" id="rejectCancellationModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="post" id="rejectCancellationForm">
+                {% csrf_token %}
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="bi bi-x-circle text-danger"></i> Reject Cancellation</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p>Rejecting will revert trade: <strong id="rejectCancellationDealNumber"></strong> to its previous status. The position will be unchanged.</p>
+                    <div class="mb-3">
+                        <label class="form-label">Comments (optional)</label>
+                        <textarea class="form-control" name="comments" rows="2" placeholder="Rejection comments..."></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                    <button type="submit" class="btn btn-danger">Reject Cancellation</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
 <!-- Settle Modal -->
 <div class="modal fade" id="settleModal" tabindex="-1">
     <div class="modal-dialog">
@@ -226,6 +297,18 @@ function showSettleModal(tradeId, dealNumber) {
     document.getElementById('settleForm').action = `/trade/${tradeId}/settle/`;
     document.getElementById('settleDealNumber').textContent = dealNumber;
     new bootstrap.Modal(document.getElementById('settleModal')).show();
+}
+
+function showApproveCancellationModal(tradeId, dealNumber) {
+    document.getElementById('approveCancellationForm').action = `/trade/${tradeId}/approve-cancellation/`;
+    document.getElementById('approveCancellationDealNumber').textContent = dealNumber;
+    new bootstrap.Modal(document.getElementById('approveCancellationModal')).show();
+}
+
+function showRejectCancellationModal(tradeId, dealNumber) {
+    document.getElementById('rejectCancellationForm').action = `/trade/${tradeId}/reject-cancellation/`;
+    document.getElementById('rejectCancellationDealNumber').textContent = dealNumber;
+    new bootstrap.Modal(document.getElementById('rejectCancellationModal')).show();
 }
 </script>
 {% endblock %}

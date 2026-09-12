@@ -668,12 +668,25 @@ def trade_detail(request, trade_id):
 
     # Checker actions — INITIAL and MODIFIED (not pending-cancel) go straight to validate
     _is_normal = not _is_deleted
-    can_validate = is_cis_record and status in [TradeKuduRepository.STATUS_INITIAL, TradeKuduRepository.STATUS_MODIFIED] and _is_normal
+    current_user = get_user_info(request)['username']
+    # Four-eyes: hide the checker action entirely from the maker who created/
+    # requested it, mirroring the backend guards in trade_validate() and
+    # trade_approve_cancellation()/trade_reject_cancellation() -- without this,
+    # the maker still sees the Validate/Approve/Reject button (only the eye
+    # icon should be theirs to use) and only finds out it's blocked after
+    # submitting and getting the four-eyes error message.
+    can_validate = (
+        is_cis_record
+        and status in [TradeKuduRepository.STATUS_INITIAL, TradeKuduRepository.STATUS_MODIFIED]
+        and _is_normal
+        and trade_data.get('created_by', '') != current_user
+    )
     can_settle = is_cis_record and status == TradeKuduRepository.STATUS_VALIDATED
     # Pending cancellation: maker set status=MODIFIED + is_deleted=true; checker approves/rejects
     _pending_cancel = is_cis_record and status == TradeKuduRepository.STATUS_MODIFIED and _is_deleted
-    can_approve_cancellation = _pending_cancel
-    can_reject_cancellation  = _pending_cancel
+    _requested_own_cancellation = trade_data.get('cancelled_by', '') == current_user
+    can_approve_cancellation = _pending_cancel and not _requested_own_cancellation
+    can_reject_cancellation  = _pending_cancel and not _requested_own_cancellation
 
     # Get trade history
     history = trade_kudu_repository.get_trade_history(trade_id)

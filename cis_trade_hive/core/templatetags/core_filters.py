@@ -221,14 +221,27 @@ def can_act(context, record, module):
         has_approve = _has_perm(request, 'trade-approval')
         is_deleted = str(_get_field(record, 'is_deleted')).lower() in ('true', '1')
         pending_cancel = is_cis and status == 'MODIFIED' and is_deleted
+        # Four-eyes: hide the checker action from the maker who created/
+        # requested it, mirroring the backend guards in trade_validate() and
+        # trade_approve_cancellation()/trade_reject_cancellation() in
+        # trade/views.py. Without this, this tag (which is what
+        # trade_detail.html/trade_list.html actually render from, not the
+        # view's can_validate/can_approve_cancellation context) let the maker
+        # see the Validate/Approve/Reject buttons and only find out they're
+        # blocked after submitting.
+        current_user = request.session.get('user_login', '')
+        created_by = _get_field(record, 'created_by')
+        cancelled_by = _get_field(record, 'cancelled_by')
+        is_own_trade = bool(created_by) and created_by == current_user
+        is_own_cancellation = bool(cancelled_by) and cancelled_by == current_user
         return {
             'can_edit':                   has_edit    and is_cis and status in ('INITIAL', 'MODIFIED', 'VALIDATED', 'SETTLED'),
             'can_cancel':                 has_edit    and is_cis and status != 'CANCELLED' and not is_deleted,
             'can_restore':                has_edit    and is_cis and (status == 'CANCELLED' or is_deleted),
-            'can_validate':               has_approve and is_cis and status in ('INITIAL', 'MODIFIED') and not is_deleted,
+            'can_validate':               has_approve and is_cis and status in ('INITIAL', 'MODIFIED') and not is_deleted and not is_own_trade,
             'can_settle':                 has_approve and is_cis and status == 'VALIDATED',
-            'can_approve_cancellation':   has_approve and pending_cancel,
-            'can_reject_cancellation':    has_approve and pending_cancel,
+            'can_approve_cancellation':   has_approve and pending_cancel and not is_own_cancellation,
+            'can_reject_cancellation':    has_approve and pending_cancel and not is_own_cancellation,
         }
 
     if module == 'portfolio':
