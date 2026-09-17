@@ -1,0 +1,7 @@
+# Impala/Kudu database name used by config/environments.py.
+# One name per line (first non-comment, non-blank line wins). Edit this file
+# to retarget the app at a different database (e.g. gmp_cis_dev) without
+# touching code or environment variables.
+#
+# Precedence: IMPALA_DB env var (if set) > this file > 'gmp_cis' default.
+gmp_cis

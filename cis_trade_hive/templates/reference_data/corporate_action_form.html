@@ -1,0 +1,466 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}{% if is_edit %}Edit{% else %}Create{% endif %} Corporate Action - CisTrade{% endblock %}
+
+{% block extra_css %}
+<!-- Select2 CSS - Local -->
+<link href="{% static 'css/select2.min.css' %}" rel="stylesheet" />
+<link href="{% static 'css/select2-bootstrap-5-theme.min.css' %}" rel="stylesheet" />
+<!-- CIS Trade Hive Select2 Custom Styles -->
+<link href="{% static 'css/select2-custom.css' %}" rel="stylesheet" />
+{% endblock %}
+
+{% block breadcrumb %}
+    <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
+    <li class="breadcrumb-item"><a href="#">Reference Data</a></li>
+    <li class="breadcrumb-item"><a href="{% url 'reference_data:corporate_action_list' %}">Corporate Actions</a></li>
+    <li class="breadcrumb-item active">{% if is_edit %}Edit{% else %}Create{% endif %}</li>
+{% endblock %}
+
+{% block content %}
+<div class="corporate-action-form-container" style="max-width: 1200px; margin: 0 auto;">
+    <!-- Page Header -->
+    <div class="content-header d-flex justify-content-between align-items-start mb-4">
+        <div>
+            <h1 class="content-title">
+                <i class="bi bi-{% if is_edit %}pencil{% else %}plus-circle{% endif %} text-primary"></i>
+                {% if is_edit %}Edit Corporate Action{% else %}Create Corporate Action{% endif %}
+            </h1>
+            <p class="content-subtitle">
+                {% if is_edit %}
+                    Update corporate action: <strong>{{ corporate_action.ca_number }}</strong>
+                {% else %}
+                    Add a new corporate action event
+                {% endif %}
+            </p>
+        </div>
+        <a href="{% url 'reference_data:corporate_action_list' %}" class="btn btn-outline-secondary">
+            <i class="bi bi-arrow-left"></i> Back to List
+        </a>
+    </div>
+
+    <!-- Form Card -->
+    <div class="card">
+        <div class="card-header">
+            <h5 class="card-title mb-0">
+                <i class="bi bi-calendar-event"></i> Corporate Action Information
+            </h5>
+        </div>
+        <div class="card-body">
+            <form method="post" class="needs-validation" novalidate>
+                {% csrf_token %}
+
+                <!-- Security & CA Type Section -->
+                <div class="mb-4">
+                    <h6 class="text-muted mb-3 border-bottom pb-2">
+                        <i class="bi bi-shield-check"></i> Security Information
+                    </h6>
+                    <div class="row g-3">
+                        <!-- Security (Required - Single select) -->
+                        <div class="col-md-6">
+                            <label for="security_name" class="form-label">
+                                Security <span class="text-danger">*</span>
+                            </label>
+                            <select class="form-select select2-security"
+                                    id="security_name"
+                                    name="security_name"
+                                    required>
+                                <option value="">Select Security...</option>
+                                {% for security in dropdown_options.securities %}
+                                    <option value="{{ security.value }}"
+                                            data-currency="{{ security.currency }}"
+                                            {% if corporate_action.security_name == security.value %}selected{% endif %}>
+                                        {{ security.label }}
+                                    </option>
+                                {% endfor %}
+                            </select>
+                            <div class="form-text"><i class="bi bi-info-circle"></i> Corporate action applies to all portfolios holding this security.</div>
+                            <div class="invalid-feedback">Security is required</div>
+                        </div>
+
+                        <!-- Corporate Action Type (Required) -->
+                        <div class="col-md-6">
+                            <label for="ca_type" class="form-label">
+                                Corporate Action Type <span class="text-danger">*</span>
+                            </label>
+                            <select class="form-select select2-ca-type"
+                                    id="ca_type"
+                                    name="ca_type"
+                                    required>
+                                <option value="">Select Type...</option>
+                                {% for ca_type in dropdown_options.ca_types %}
+                                    <option value="{{ ca_type.value }}"
+                                            {% if corporate_action.ca_type == ca_type.value %}selected{% endif %}>
+                                        {{ ca_type.label }}
+                                    </option>
+                                {% endfor %}
+                            </select>
+                            <div class="invalid-feedback">Corporate Action Type is required</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Dates Section -->
+                <div class="mb-4">
+                    <h6 class="text-muted mb-3 border-bottom pb-2">
+                        <i class="bi bi-calendar3"></i> Key Dates
+                    </h6>
+                    <div class="row g-3">
+                        <!-- Announcement Date -->
+                        <div class="col-md-4">
+                            <label for="announcement_date" class="form-label">
+                                Announce Date
+                            </label>
+                            <input type="date"
+                                   class="form-control"
+                                   id="announcement_date"
+                                   name="announcement_date"
+                                   value="{{ corporate_action.announcement_date|default:'' }}">
+                        </div>
+
+                        <!-- Ex Date -->
+                        <div class="col-md-4">
+                            <label for="ex_date" class="form-label">
+                                Ex Date <span class="text-danger">*</span>
+                            </label>
+                            <input type="date"
+                                   class="form-control"
+                                   id="ex_date"
+                                   name="ex_date"
+                                   value="{{ corporate_action.ex_date|default:'' }}"
+                                   required>
+                            <div class="invalid-feedback">Ex date is required</div>
+                        </div>
+
+                        <!-- Record Date -->
+                        <div class="col-md-4">
+                            <label for="record_date" class="form-label">
+                                Record Date <span class="text-danger">*</span>
+                            </label>
+                            <input type="date"
+                                   class="form-control"
+                                   id="record_date"
+                                   name="record_date"
+                                   value="{{ corporate_action.record_date|default:'' }}"
+                                   required>
+                            <div class="invalid-feedback">Record date is required</div>
+                        </div>
+
+                        <!-- Payment Date -->
+                        <div class="col-md-4">
+                            <label for="payment_date" class="form-label">
+                                Payment Date <span class="text-danger">*</span>
+                            </label>
+                            <input type="date"
+                                   class="form-control"
+                                   id="payment_date"
+                                   name="payment_date"
+                                   value="{{ corporate_action.payment_date|default:'' }}"
+                                   required>
+                            <div class="invalid-feedback">Payment date is required</div>
+                        </div>
+
+                        <!-- Effective Date -->
+                        <div class="col-md-4">
+                            <label for="effective_date" class="form-label">
+                                Effective Date
+                            </label>
+                            <input type="date"
+                                   class="form-control"
+                                   id="effective_date"
+                                   name="effective_date"
+                                   value="{{ corporate_action.effective_date|default:'' }}">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Subscription Dates Section (Only for Bonus Issue, Rights, Warrant) -->
+                <div class="mb-4" id="subscription_period_section" style="display: none;">
+                    <h6 class="text-muted mb-3 border-bottom pb-2">
+                        <i class="bi bi-calendar-range"></i> Subscription Period
+                    </h6>
+                    <div class="row g-3">
+                        <!-- Subscription Start Date -->
+                        <div class="col-md-4">
+                            <label for="subscription_start_date" class="form-label">
+                                Subscription Start Date <span class="text-danger subscription-required">*</span>
+                            </label>
+                            <input type="date"
+                                   class="form-control"
+                                   id="subscription_start_date"
+                                   name="subscription_start_date"
+                                   value="{{ corporate_action.subscription_start_date|default:'' }}">
+                            <div class="invalid-feedback">Subscription start date is required</div>
+                        </div>
+
+                        <!-- Subscription End Date -->
+                        <div class="col-md-4">
+                            <label for="subscription_end_date" class="form-label">
+                                Subscription End Date <span class="text-danger subscription-required">*</span>
+                            </label>
+                            <input type="date"
+                                   class="form-control"
+                                   id="subscription_end_date"
+                                   name="subscription_end_date"
+                                   value="{{ corporate_action.subscription_end_date|default:'' }}">
+                            <div class="invalid-feedback">Subscription end date is required</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Price & Currency Section -->
+                <div class="mb-4">
+                    <h6 class="text-muted mb-3 border-bottom pb-2">
+                        <i class="bi bi-currency-dollar"></i> Price Information
+                    </h6>
+                    <div class="row g-3">
+                        <!-- Price -->
+                        <div class="col-md-4">
+                            <label for="price" class="form-label">Price</label>
+                            <input type="number"
+                                   class="form-control"
+                                   id="price"
+                                   name="price"
+                                   step="0.000001"
+                                   min="0"
+                                   value="{{ corporate_action.price|default:'' }}"
+                                   placeholder="0.00">
+                        </div>
+
+                        <!-- Currency (Auto-populated from Security - Readonly) -->
+                        <div class="col-md-4">
+                            <label for="currency" class="form-label">
+                                Currency <span class="text-danger">*</span>
+                                <small class="text-muted">(from Security)</small>
+                            </label>
+                            <input type="text"
+                                   class="form-control bg-light"
+                                   id="currency_display"
+                                   readonly
+                                   placeholder="Select Security first..."
+                                   value="{{ corporate_action.currency|default:'' }}">
+                            <input type="hidden" id="currency" name="currency" value="{{ corporate_action.currency|default:'' }}" required>
+                            <div class="invalid-feedback">Currency is required</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- CA Number (Auto-generated for create, read-only for edit) -->
+                {% if is_edit %}
+                <div class="mb-4">
+                    <h6 class="text-muted mb-3 border-bottom pb-2">
+                        <i class="bi bi-hash"></i> System Information
+                    </h6>
+                    <div class="row g-3">
+                        <div class="col-md-4">
+                            <label for="ca_number" class="form-label">CA Number</label>
+                            <input type="text"
+                                   class="form-control"
+                                   id="ca_number"
+                                   name="ca_number"
+                                   value="{{ corporate_action.ca_number|default:'' }}"
+                                   readonly>
+                            <div class="form-text">Auto-generated identifier</div>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Status</label>
+                            <div>
+                                <span class="badge badge-{{ corporate_action.status|lower }} fs-6">
+                                    {{ corporate_action.status|default:'INITIAL' }}
+                                </span>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Source System</label>
+                            <div>
+                                <span class="badge badge-{% if corporate_action.src_system|upper == 'CIS' %}success{% else %}secondary{% endif %} fs-6">
+                                    {{ corporate_action.src_system|upper|default:'CIS' }}
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+
+                <!-- Form Actions -->
+                <div class="d-flex justify-content-between gap-2 mt-4 pt-3 border-top">
+                    <a href="{% url 'reference_data:corporate_action_list' %}" class="btn btn-outline-secondary">
+                        <i class="bi bi-x-circle"></i> Cancel
+                    </a>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-check-circle"></i>
+                        {% if is_edit %}Update Corporate Action{% else %}Create Corporate Action{% endif %}
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Help Info -->
+    <div class="alert alert-info mt-4">
+        <i class="bi bi-info-circle"></i>
+        <strong>Note:</strong>
+        <ul class="mb-0 mt-2">
+            <li>CA Number is auto-generated when you create a new corporate action</li>
+            <li>Ex Date, Record Date and Payment Date are required; Announce Date and Effective Date are optional</li>
+            <li><strong>Subscription Period</strong> is only required for: Rights Entitlement, Warrant Entitlement</li>
+            <li>New corporate actions are created with <strong>INITIAL</strong> status</li>
+            <li>A different user must validate the record (Four-Eyes Principle)</li>
+            <li>Currency is auto-populated based on the selected security</li>
+        </ul>
+    </div>
+</div>
+
+<!-- jQuery (required for Select2) - Local -->
+<script src="{% static 'js/jquery-3.7.1.min.js' %}"></script>
+
+<!-- Select2 JS - Local -->
+<script src="{% static 'js/select2.min.js' %}"></script>
+
+<!-- CIS Trade Hive Select2 Global Initialization -->
+<script src="{% static 'js/select2-init.js' %}"></script>
+
+<script>
+// CA types that require subscription period
+var SUBSCRIPTION_CA_TYPES = ['RIGHTS_ENTITLEMENT', 'WARRANT_ENTITLEMENT'];
+
+// Function to toggle subscription period visibility and required status
+function toggleSubscriptionPeriod(caType) {
+    var subscriptionSection = document.getElementById('subscription_period_section');
+    var startDateField = document.getElementById('subscription_start_date');
+    var endDateField = document.getElementById('subscription_end_date');
+
+    if (SUBSCRIPTION_CA_TYPES.includes(caType)) {
+        // Show subscription period section
+        subscriptionSection.style.display = 'block';
+        startDateField.required = true;
+        endDateField.required = true;
+    } else {
+        // Hide subscription period section
+        subscriptionSection.style.display = 'none';
+        startDateField.required = false;
+        endDateField.required = false;
+        // Clear values when hidden
+        startDateField.value = '';
+        endDateField.value = '';
+    }
+}
+
+// Initialize Select2 on all dropdowns
+$(document).ready(function() {
+    // Initialize security dropdown with Select2 (single select)
+    $('.select2-security').each(function() {
+        CISSelect2.initElement($(this));
+    });
+
+    // Initialize CA type dropdown with Select2
+    $('.select2-ca-type').each(function() {
+        CISSelect2.initElement($(this));
+    });
+
+    // Handle CA type change to show/hide subscription period
+    $('#ca_type').on('change', function() {
+        var selectedType = $(this).val();
+        toggleSubscriptionPeriod(selectedType);
+    });
+
+    // In edit mode, force Select2 to show the saved ca_type.
+    // Select2 with allowClear+placeholder resets the display even when the native
+    // <select> has a `selected` attribute — must set it explicitly after init.
+    {% if is_edit and corporate_action.ca_type %}
+    var preselectedCAType = "{{ corporate_action.ca_type|escapejs }}";
+    if (preselectedCAType) {
+        setTimeout(function() {
+            var $caType = $('#ca_type');
+            var $opt = $caType.find('option[value="' + preselectedCAType + '"]');
+            if ($opt.length > 0) {
+                $caType.val(preselectedCAType).trigger('change');
+            } else {
+                console.warn('CA type "' + preselectedCAType + '" not found in dropdown. Available:', $caType.find('option').map(function() { return $(this).val(); }).get());
+            }
+        }, 0);
+    }
+    {% else %}
+    // On page load (create mode), check current CA type and toggle subscription period
+    var currentCAType = $('#ca_type').val();
+    if (currentCAType) {
+        toggleSubscriptionPeriod(currentCAType);
+    }
+    {% endif %}
+
+    // Auto-populate currency when security is selected
+    // Currency is readonly and auto-set from security
+    $('#security_name').on('change', function() {
+        var selectedOption = $(this).find('option:selected');
+        if (selectedOption.val()) {
+            var currency = selectedOption.data('currency');
+            if (currency) {
+                $('#currency').val(currency);
+                $('#currency_display').val(currency);
+            } else {
+                $('#currency').val('');
+                $('#currency_display').val('');
+            }
+        } else {
+            // Clear currency if no security selected
+            $('#currency').val('');
+            $('#currency_display').val('');
+        }
+    });
+
+    // On page load for edit mode, ensure currency display is set
+    {% if is_edit %}
+    var selectedSecurity = $('#security_name option:selected');
+    if (selectedSecurity.val() && !$('#currency_display').val()) {
+        var currency = selectedSecurity.data('currency');
+        if (currency) {
+            $('#currency_display').val(currency);
+        }
+    }
+    {% endif %}
+});
+
+// Client-side form validation with operation popup
+(function() {
+    'use strict';
+    var forms = document.querySelectorAll('.needs-validation');
+    Array.prototype.slice.call(forms).forEach(function(form) {
+        form.addEventListener('submit', function(event) {
+            if (!form.checkValidity()) {
+                event.preventDefault();
+                event.stopPropagation();
+                form.classList.add('was-validated');
+                return;
+            }
+            form.classList.add('was-validated');
+            event.preventDefault();
+            var caNumEl = document.getElementById('ca_number');
+            var caNum = (caNumEl && caNumEl.value) ? caNumEl.value : '';
+            var entity = caNum ? ('Corporate Action ' + caNum) : 'Corporate Action';
+            var operation = '{% if is_edit %}update{% else %}create{% endif %}';
+            submitWithPopup(operation, entity, form);
+        }, false);
+    });
+})();
+
+// Date validation: Subscription end date must be after start date
+document.getElementById('subscription_end_date').addEventListener('change', function() {
+    var startDate = document.getElementById('subscription_start_date').value;
+    var endDate = this.value;
+    if (startDate && endDate && endDate < startDate) {
+        this.setCustomValidity('Subscription end date must be after start date');
+    } else {
+        this.setCustomValidity('');
+    }
+});
+
+document.getElementById('subscription_start_date').addEventListener('change', function() {
+    // Re-validate end date when start date changes
+    var endDateField = document.getElementById('subscription_end_date');
+    if (endDateField.value) {
+        endDateField.dispatchEvent(new Event('change'));
+    }
+});
+</script>
+{% endblock %}

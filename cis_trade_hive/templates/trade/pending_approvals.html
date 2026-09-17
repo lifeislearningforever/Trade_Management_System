@@ -1,0 +1,314 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Pending {% if view_type == 'validation' %}Validation{% else %}Settlement{% endif %} - CisTrade{% endblock %}
+
+{% block breadcrumb %}
+    <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
+    <li class="breadcrumb-item"><a href="{% url 'trade:list' %}">Trades</a></li>
+    <li class="breadcrumb-item active">Pending {% if view_type == 'validation' %}Validation{% else %}Settlement{% endif %}</li>
+{% endblock %}
+
+{% block content %}
+<div class="pending-approvals-container">
+    <!-- Page Header -->
+    <div class="content-header">
+        <h1 class="content-title">
+            <i class="bi bi-{% if view_type == 'validation' %}clock-history{% else %}check2-circle{% endif %} text-{% if view_type == 'validation' %}warning{% else %}info{% endif %}"></i>
+            Pending {% if view_type == 'validation' %}Validation{% else %}Settlement{% endif %}
+        </h1>
+        <p class="content-subtitle">
+            {% if view_type == 'validation' %}
+                Review and validate trades booked by makers
+            {% else %}
+                Settle validated trades to make them active
+            {% endif %}
+        </p>
+    </div>
+
+    <!-- Action Buttons -->
+    <div class="mb-4">
+        <a href="{% url 'trade:list' %}" class="btn btn-outline-secondary">
+            <i class="bi bi-arrow-left"></i> Back to Trade List
+        </a>
+        {% if view_type == 'validation' %}
+        <a href="{% url 'trade:pending_settlement' %}" class="btn btn-info">
+            <i class="bi bi-check2-circle"></i> Pending Settlement
+            {% if pending_settlement_count %}
+                <span class="badge bg-danger">{{ pending_settlement_count }}</span>
+            {% endif %}
+        </a>
+        {% else %}
+        <a href="{% url 'trade:pending_validation' %}" class="btn btn-warning">
+            <i class="bi bi-clock-history"></i> Pending Validation
+            {% if pending_validation_count %}
+                <span class="badge bg-danger">{{ pending_validation_count }}</span>
+            {% endif %}
+        </a>
+        {% endif %}
+    </div>
+
+    <!-- Trades Table -->
+    <div class="card">
+        <div class="card-header">
+            <h5 class="card-title mb-0">
+                {% if view_type == 'validation' %}
+                    <span class="badge bg-warning text-dark me-2">{{ pending_count }}</span> Trades Pending Validation
+                {% else %}
+                    <span class="badge bg-info me-2">{{ pending_count }}</span> Trades Ready for Settlement
+                {% endif %}
+            </h5>
+        </div>
+        <div class="card-body p-0">
+            {% if trades %}
+                <div class="table-responsive">
+                    <table class="table table-hover table-sm mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Deal #</th>
+                                <th>Type</th>
+                                <th>Portfolio</th>
+                                <th>Security</th>
+                                <th>Trade Date</th>
+                                <th>Quantity</th>
+                                <th>Price</th>
+                                <th>Total</th>
+                                <th>Status</th>
+                                <th>Created By</th>
+                                <th>Created At</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for trade in trades %}
+                            <tr>
+                                <td><strong class="text-primary">{{ trade.deal_number|default:"-" }}</strong></td>
+                                <td>
+                                    {% if trade.trade_type == 'BUY' %}
+                                        <span class="badge bg-success">Buy</span>
+                                    {% elif trade.trade_type == 'SELL' %}
+                                        <span class="badge bg-danger">Sell</span>
+                                    {% else %}
+                                        <span class="badge bg-secondary">{{ trade.trade_type }}</span>
+                                    {% endif %}
+                                </td>
+                                <td>{{ trade.portfolio_short_name|default:"-" }}</td>
+                                <td>{{ trade.security_label|default:"-" }}</td>
+                                <td>{{ trade.trade_date|default:"-" }}</td>
+                                <td class="text-end">{{ trade.quantity|floatformat:2|default:"0.00" }}</td>
+                                <td class="text-end">{{ trade.price|floatformat:4|default:"0.0000" }}</td>
+                                <td class="text-end">{{ trade.total_amount|floatformat:2|default:"0.00" }}</td>
+                                <td>
+                                    {% if trade.is_deleted %}
+                                        <span class="badge bg-danger">Cancel Pending</span>
+                                    {% elif trade.status == 'INITIAL' %}
+                                        <span class="badge bg-secondary">Initial</span>
+                                    {% elif trade.status == 'MODIFIED' %}
+                                        <span class="badge bg-info text-dark">Modified</span>
+                                    {% else %}
+                                        <span class="badge bg-secondary">{{ trade.status }}</span>
+                                    {% endif %}
+                                </td>
+                                <td>{{ trade.created_by|default:"-" }}</td>
+                                <td style="font-size: 0.85rem;">{{ trade.created_at|default:"-" }}</td>
+                                <td>
+                                    <div class="btn-group btn-group-sm" role="group">
+                                        <a href="{% url 'trade:detail' trade.trade_id %}" class="btn btn-sm btn-outline-primary" title="View Details">
+                                            <i class="bi bi-eye"></i>
+                                        </a>
+                                        {% if view_type == 'validation' %}
+                                            {% if trade.is_deleted %}
+                                                {# Cancel-pending rows (this list also includes MODIFIED+is_deleted=true+
+                                                   cancel_reason, per get_pending_validation_trades) need the cancellation
+                                                   approve/reject actions, not Validate -- posting Validate here would hit
+                                                   trade_validate(), which isn't the workflow for a pending cancellation. #}
+                                                {% if trade.cancelled_by != request.session.user_login %}
+                                                    <button type="button" class="btn btn-sm btn-success"
+                                                            onclick="showApproveCancellationModal({{ trade.trade_id }}, '{{ trade.deal_number }}')"
+                                                            title="Approve Cancellation">
+                                                        <i class="bi bi-check-circle"></i>
+                                                    </button>
+                                                    <button type="button" class="btn btn-sm btn-danger"
+                                                            onclick="showRejectCancellationModal({{ trade.trade_id }}, '{{ trade.deal_number }}')"
+                                                            title="Reject Cancellation">
+                                                        <i class="bi bi-x-circle"></i>
+                                                    </button>
+                                                {% endif %}
+                                            {% elif trade.created_by != request.session.user_login %}
+                                                <button type="button" class="btn btn-sm btn-success"
+                                                        onclick="showValidateModal({{ trade.trade_id }}, '{{ trade.deal_number }}')"
+                                                        title="Validate">
+                                                    <i class="bi bi-check-circle"></i>
+                                                </button>
+                                            {% endif %}
+                                        {% else %}
+                                            <button type="button" class="btn btn-sm btn-success"
+                                                    onclick="showSettleModal({{ trade.trade_id }}, '{{ trade.deal_number }}')"
+                                                    title="Settle">
+                                                <i class="bi bi-check2-all"></i>
+                                            </button>
+                                        {% endif %}
+                                    </div>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            {% else %}
+                <div class="text-center py-5" style="color: var(--gray-500);">
+                    <i class="bi bi-inbox" style="font-size: 3rem; opacity: 0.3;"></i>
+                    <p class="mt-3 mb-0">No trades pending {% if view_type == 'validation' %}validation{% else %}settlement{% endif %}</p>
+                    <p class="text-muted">
+                        <a href="{% url 'trade:list' %}" class="btn btn-outline-primary mt-2">
+                            <i class="bi bi-arrow-left"></i> Back to Trade List
+                        </a>
+                    </p>
+                </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Four-Eyes Info -->
+    <div class="alert alert-info mt-4">
+        <i class="bi bi-shield-check"></i>
+        <strong>Four-Eyes Principle:</strong>
+        You cannot {% if view_type == 'validation' %}validate{% else %}settle{% endif %} trades that you created.
+        The system will prevent self-approval.
+    </div>
+</div>
+
+<!-- Validate Modal -->
+<div class="modal fade" id="validateModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="post" id="validateForm">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="approve">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="bi bi-check-circle text-success"></i> Validate Trade</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p>Validate trade: <strong id="validateDealNumber"></strong>?</p>
+                    <div class="mb-3">
+                        <label class="form-label">Comments (optional)</label>
+                        <textarea class="form-control" name="comments" rows="3" placeholder="Enter validation comments..."></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-success">Validate</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Approve Cancellation Modal -->
+<div class="modal fade" id="approveCancellationModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="post" id="approveCancellationForm">
+                {% csrf_token %}
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="bi bi-check-circle text-success"></i> Approve Cancellation</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p>Approving will permanently cancel trade: <strong id="approveCancellationDealNumber"></strong> and reverse its AVP position.</p>
+                    <div class="mb-3">
+                        <label class="form-label">Comments (optional)</label>
+                        <textarea class="form-control" name="comments" rows="2" placeholder="Approval comments..."></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                    <button type="submit" class="btn btn-success">Approve Cancellation</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Reject Cancellation Modal -->
+<div class="modal fade" id="rejectCancellationModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="post" id="rejectCancellationForm">
+                {% csrf_token %}
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="bi bi-x-circle text-danger"></i> Reject Cancellation</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p>Rejecting will revert trade: <strong id="rejectCancellationDealNumber"></strong> to its previous status. The position will be unchanged.</p>
+                    <div class="mb-3">
+                        <label class="form-label">Comments (optional)</label>
+                        <textarea class="form-control" name="comments" rows="2" placeholder="Rejection comments..."></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                    <button type="submit" class="btn btn-danger">Reject Cancellation</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Settle Modal -->
+<div class="modal fade" id="settleModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="post" id="settleForm">
+                {% csrf_token %}
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="bi bi-check2-all text-success"></i> Settle Trade</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p>Settle trade: <strong id="settleDealNumber"></strong>?</p>
+                    <p class="text-muted">This will make the trade active and update positions.</p>
+                    <div class="mb-3">
+                        <label class="form-label">Settlement Comments (optional)</label>
+                        <textarea class="form-control" name="comments" rows="3" placeholder="Enter settlement comments..."></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-success">Settle</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function showValidateModal(tradeId, dealNumber) {
+    document.getElementById('validateForm').action = `/trade/${tradeId}/validate/`;
+    document.getElementById('validateDealNumber').textContent = dealNumber;
+    new bootstrap.Modal(document.getElementById('validateModal')).show();
+}
+
+function showSettleModal(tradeId, dealNumber) {
+    document.getElementById('settleForm').action = `/trade/${tradeId}/settle/`;
+    document.getElementById('settleDealNumber').textContent = dealNumber;
+    new bootstrap.Modal(document.getElementById('settleModal')).show();
+}
+
+function showApproveCancellationModal(tradeId, dealNumber) {
+    document.getElementById('approveCancellationForm').action = `/trade/${tradeId}/approve-cancellation/`;
+    document.getElementById('approveCancellationDealNumber').textContent = dealNumber;
+    new bootstrap.Modal(document.getElementById('approveCancellationModal')).show();
+}
+
+function showRejectCancellationModal(tradeId, dealNumber) {
+    document.getElementById('rejectCancellationForm').action = `/trade/${tradeId}/reject-cancellation/`;
+    document.getElementById('rejectCancellationDealNumber').textContent = dealNumber;
+    new bootstrap.Modal(document.getElementById('rejectCancellationModal')).show();
+}
+</script>
+{% endblock %}

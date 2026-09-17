@@ -1,0 +1,278 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Pending Validation - CisTrade{% endblock %}
+
+{% block breadcrumb %}
+    <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
+    <li class="breadcrumb-item"><a href="{% url 'portfolio:list' %}">Portfolios</a></li>
+    <li class="breadcrumb-item active">Pending Validation</li>
+{% endblock %}
+
+{% block content %}
+<div class="pending-approvals-container">
+    <!-- Page Header -->
+    <div class="content-header">
+        <h1 class="content-title">
+            <i class="bi bi-clock-history text-warning"></i> Pending Validation
+        </h1>
+        <p class="content-subtitle">Four-Eyes Principle (Maker-Checker) - Review and validate portfolios</p>
+    </div>
+
+    <!-- Navigation Tabs -->
+    <ul class="nav nav-tabs mb-4">
+        <li class="nav-item">
+            <a class="nav-link {% if view_type == 'validation' %}active{% endif %}" href="{% url 'portfolio:pending_validation' %}">
+                <i class="bi bi-clock-history"></i> Pending Validation
+                {% if pending_validation_count %}
+                    <span class="badge bg-warning">{{ pending_validation_count }}</span>
+                {% endif %}
+            </a>
+        </li>
+        <li class="nav-item">
+            <a class="nav-link {% if view_type == 'settlement' %}active{% endif %}" href="{% url 'portfolio:pending_settlement' %}">
+                <i class="bi bi-check2-circle"></i> Pending Settlement
+                {% if pending_settlement_count %}
+                    <span class="badge bg-info">{{ pending_settlement_count }}</span>
+                {% endif %}
+            </a>
+        </li>
+    </ul>
+
+    <!-- Pending Portfolios Table -->
+    <div class="card">
+        <div class="card-header">
+            <h5 class="card-title mb-0">
+                {% if view_type == 'validation' %}
+                    Portfolios Awaiting Validation
+                    <span class="badge badge-warning ms-2">{{ pending_count }} pending</span>
+                {% else %}
+                    Validated Portfolios Awaiting Settlement
+                    <span class="badge badge-info ms-2">{{ pending_count }} pending</span>
+                {% endif %}
+            </h5>
+        </div>
+        <div class="card-body p-0">
+            {% if portfolios %}
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0">
+                        <thead>
+                            <tr>
+                                <th style="width: 8%;">Source</th>
+                                <th style="width: 22%;">Portfolio Name</th>
+                                <th style="width: 10%;">Manager</th>
+                                <th style="width: 8%;">Currency</th>
+                                <th style="width: 10%;">Status</th>
+                                <th style="width: 12%;">Submitted By</th>
+                                <th style="width: 12%;">Submitted At</th>
+                                <th style="width: 18%;">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for portfolio in portfolios %}
+                            <tr>
+                                <td>
+                                    {% if portfolio.src_system|upper == 'CIS' %}
+                                        <span class="badge badge-success">CIS</span>
+                                    {% else %}
+                                        <span class="badge badge-secondary">{{ portfolio.src_system|upper|default:"GMP" }}</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    <a href="{% url 'portfolio:detail' portfolio.name %}" class="text-decoration-none">
+                                        <strong class="text-primary">{{ portfolio.name }}</strong>
+                                    </a>
+                                </td>
+                                <td>{{ portfolio.manager|default:"-" }}</td>
+                                <td>
+                                    <span class="badge badge-info">{{ portfolio.currency }}</span>
+                                </td>
+                                <td>
+                                    {% if portfolio.status == 'PENDING_VALIDATION' %}
+                                        <span class="badge badge-warning">Pending Validation</span>
+                                    {% elif portfolio.status == 'VALIDATED' %}
+                                        <span class="badge badge-primary">Validated</span>
+                                    {% else %}
+                                        <span class="badge badge-secondary">{{ portfolio.status }}</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    <i class="bi bi-person-circle"></i> {{ portfolio.submitted_by|default:portfolio.updated_by|default:"-" }}
+                                </td>
+                                <td style="font-size: var(--font-size-sm);">
+                                    {{ portfolio.submitted_at|default:portfolio.updated_at|default:"-" }}
+                                </td>
+                                <td>
+                                    <div class="btn-group btn-group-sm">
+                                        <a href="{% url 'portfolio:detail' portfolio.name %}" class="btn btn-outline-primary" title="View Details">
+                                            <i class="bi bi-eye"></i> View
+                                        </a>
+                                        {% if view_type == 'validation' %}
+                                            <button type="button" class="btn btn-outline-success"
+                                                    onclick="validatePortfolio('{{ portfolio.name }}')" title="Validate">
+                                                <i class="bi bi-check-circle"></i> Validate
+                                            </button>
+                                            <button type="button" class="btn btn-outline-danger"
+                                                    onclick="rejectPortfolio('{{ portfolio.name }}')" title="Reject">
+                                                <i class="bi bi-x-circle"></i> Reject
+                                            </button>
+                                        {% else %}
+                                            <button type="button" class="btn btn-outline-success"
+                                                    onclick="settlePortfolio('{{ portfolio.name }}')" title="Settle">
+                                                <i class="bi bi-check2-all"></i> Settle
+                                            </button>
+                                        {% endif %}
+                                    </div>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            {% else %}
+                <div class="text-center py-5" style="color: var(--gray-500);">
+                    <i class="bi bi-check-circle" style="font-size: 3rem; opacity: 0.3;"></i>
+                    <p class="mt-3 mb-0">No pending {% if view_type == 'validation' %}validation{% else %}settlement{% endif %}</p>
+                    <p class="text-muted">All portfolios have been reviewed</p>
+                </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Info Alert -->
+    <div class="alert alert-warning mt-4">
+        <i class="bi bi-shield-check"></i>
+        <strong>Four-Eyes Principle:</strong>
+        {% if view_type == 'validation' %}
+            You can only validate/reject portfolios submitted by other users. This ensures independent review of all changes.
+            <ul class="mb-0 mt-2">
+                <li><strong>Validate:</strong> Approve the portfolio → Status becomes <span class="badge badge-primary">VALIDATED</span></li>
+                <li><strong>Reject:</strong> Reject the portfolio → Status becomes <span class="badge badge-dark">CANCELLED</span></li>
+            </ul>
+        {% else %}
+            You can only settle portfolios validated by other users. Settlement activates the portfolio.
+            <ul class="mb-0 mt-2">
+                <li><strong>Settle:</strong> Activate the portfolio → Status becomes <span class="badge badge-success">SETTLED</span> (Active)</li>
+            </ul>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Validate Modal -->
+<div class="modal fade" id="validateModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-success text-white">
+                <h5 class="modal-title"><i class="bi bi-check-circle"></i> Validate Portfolio</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <form method="post" id="validateForm">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="approve">
+                <div class="modal-body">
+                    <p>Are you sure you want to validate portfolio <strong id="validatePortfolioName"></strong>?</p>
+                    <div class="mb-3">
+                        <label for="validate_comments" class="form-label">Comments (optional)</label>
+                        <textarea class="form-control" id="validate_comments" name="comments" rows="3"
+                                  placeholder="Add any comments about this validation..."></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-success">
+                        <i class="bi bi-check-circle"></i> Validate
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Reject Modal -->
+<div class="modal fade" id="rejectModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-danger text-white">
+                <h5 class="modal-title"><i class="bi bi-x-circle"></i> Reject Portfolio</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <form method="post" id="rejectForm">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="reject">
+                <div class="modal-body">
+                    <p>Are you sure you want to reject portfolio <strong id="rejectPortfolioName"></strong>?</p>
+                    <div class="alert alert-warning">
+                        <i class="bi bi-exclamation-triangle"></i>
+                        The portfolio will be marked as <span class="badge badge-dark">CANCELLED</span>.
+                    </div>
+                    <div class="mb-3">
+                        <label for="reject_comments" class="form-label">Rejection Reason <span class="text-danger">*</span></label>
+                        <textarea class="form-control" id="reject_comments" name="comments" rows="3" required
+                                  placeholder="Please provide a reason for rejection..."></textarea>
+                        <div class="form-text">Please provide a reason for rejection</div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-danger">
+                        <i class="bi bi-x-circle"></i> Reject
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Settle Modal -->
+<div class="modal fade" id="settleModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-success text-white">
+                <h5 class="modal-title"><i class="bi bi-check2-all"></i> Settle Portfolio</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <form method="post" id="settleForm">
+                {% csrf_token %}
+                <div class="modal-body">
+                    <p>Are you sure you want to settle portfolio <strong id="settlePortfolioName"></strong>?</p>
+                    <div class="alert alert-info">
+                        <i class="bi bi-info-circle"></i>
+                        The portfolio will become <span class="badge badge-success">SETTLED</span> and active.
+                    </div>
+                    <div class="mb-3">
+                        <label for="settle_comments" class="form-label">Settlement Comments (optional)</label>
+                        <textarea class="form-control" id="settle_comments" name="comments" rows="3"
+                                  placeholder="Add any comments about this settlement..."></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-success">
+                        <i class="bi bi-check2-all"></i> Settle
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+function validatePortfolio(portfolioName) {
+    document.getElementById('validatePortfolioName').textContent = portfolioName;
+    document.getElementById('validateForm').action = '/portfolio/' + encodeURIComponent(portfolioName) + '/validate/';
+    new bootstrap.Modal(document.getElementById('validateModal')).show();
+}
+
+function rejectPortfolio(portfolioName) {
+    document.getElementById('rejectPortfolioName').textContent = portfolioName;
+    document.getElementById('rejectForm').action = '/portfolio/' + encodeURIComponent(portfolioName) + '/validate/';
+    new bootstrap.Modal(document.getElementById('rejectModal')).show();
+}
+
+function settlePortfolio(portfolioName) {
+    document.getElementById('settlePortfolioName').textContent = portfolioName;
+    document.getElementById('settleForm').action = '/portfolio/' + encodeURIComponent(portfolioName) + '/settle/';
+    new bootstrap.Modal(document.getElementById('settleModal')).show();
+}
+</script>
+{% endblock %}

@@ -1,0 +1,82 @@
+{% extends 'base.html' %}
+
+{% block title %}{{ action }} User - RBAC Admin{% endblock %}
+
+{% block breadcrumb %}
+    <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
+    <li class="breadcrumb-item"><a href="{% url 'core:rbac_dashboard' %}">RBAC Admin</a></li>
+    <li class="breadcrumb-item"><a href="{% url 'core:rbac_user_list' %}">Users</a></li>
+    <li class="breadcrumb-item active">{{ action }}</li>
+{% endblock %}
+
+{% block content %}
+<div class="content-header">
+    <h1 class="content-title"><i class="bi bi-person text-primary"></i> {{ action }} User</h1>
+</div>
+
+{% if messages %}
+<div class="mb-3">
+    {% for msg in messages %}
+    <div class="alert alert-{% if msg.tags == 'error' %}danger{% else %}{{ msg.tags }}{% endif %} alert-dismissible fade show py-2">
+        {{ msg }} <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
+<div class="card" style="max-width: 600px;">
+    <div class="card-body">
+        <form method="post">
+            {% csrf_token %}
+
+            <div class="mb-3">
+                <label class="form-label">Login <span class="text-danger">*</span></label>
+                <input type="text" name="login" class="form-control"
+                       value="{{ user.login|default:'' }}"
+                       placeholder="e.g. JOHN.DOE" required>
+                <div class="form-text">Will be stored in UPPERCASE.</div>
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label">Full Name <span class="text-danger">*</span></label>
+                <input type="text" name="name" class="form-control"
+                       value="{{ user.name|default:'' }}"
+                       placeholder="e.g. John Doe" required>
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label">Email</label>
+                <input type="email" name="email" class="form-control"
+                       value="{{ user.email|default:'' }}"
+                       placeholder="john.doe@example.com">
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label">Default Entity</label>
+                <select name="default_entity" class="form-select">
+                    <option value="UOBS" {% if user.default_entity == 'UOBS' or not user %}selected{% endif %}>UOBS</option>
+                    <option value="UOBM" {% if user.default_entity == 'UOBM' %}selected{% endif %}>UOBM</option>
+                    <option value="UOBT" {% if user.default_entity == 'UOBT' %}selected{% endif %}>UOBT</option>
+                </select>
+            </div>
+
+            {% if action == 'Edit' %}
+            <div class="mb-3">
+                <label class="form-label">Status</label>
+                <select name="is_active" class="form-select">
+                    <option value="1" {% if user.is_active %}selected{% endif %}>Active</option>
+                    <option value="0" {% if not user.is_active %}selected{% endif %}>Inactive</option>
+                </select>
+            </div>
+            {% endif %}
+
+            <div class="d-flex gap-2">
+                <button type="submit" class="btn btn-primary">
+                    <i class="bi bi-check-lg"></i> Save
+                </button>
+                <a href="{% url 'core:rbac_user_list' %}" class="btn btn-outline-secondary">Cancel</a>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

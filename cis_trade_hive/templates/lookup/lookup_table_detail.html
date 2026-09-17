@@ -1,0 +1,610 @@
+{% extends 'base.html' %}
+{% load static core_filters %}
+
+{% block title %}{{ table_info.display_name }} - Lookup Tables{% endblock %}
+
+{% block breadcrumb %}
+    <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
+    <li class="breadcrumb-item">Configuration</li>
+    <li class="breadcrumb-item"><a href="{% url 'lookup:table_list' %}">Lookup Tables</a></li>
+    <li class="breadcrumb-item active">{{ table_info.display_name }}</li>
+{% endblock %}
+
+{% block content %}
+<div class="lookup-detail-container">
+    <!-- Page Header -->
+    <div class="content-header d-flex justify-content-between align-items-start">
+        <div>
+            <h1 class="content-title">
+                <i class="bi bi-table text-primary"></i> {{ table_info.display_name }}
+            </h1>
+            <p class="content-subtitle">
+                <code>{{ table_name }}</code> | {{ total_count }} rows | PK: <code>{{ pk_column }}</code>
+            </p>
+        </div>
+        <div class="d-flex gap-2">
+            <a href="?export=csv{% if search %}&search={{ search }}{% endif %}" class="btn btn-success">
+                <i class="bi bi-download"></i> Export CSV
+            </a>
+            <a href="{% url 'lookup:table_list' %}" class="btn btn-outline-secondary">
+                <i class="bi bi-arrow-left"></i> Back to Tables
+            </a>
+        </div>
+    </div>
+
+    <!-- Search Card -->
+    <div class="card mb-4">
+        <div class="card-header">
+            <h5 class="card-title mb-0">
+                <i class="bi bi-search"></i> Search
+            </h5>
+        </div>
+        <div class="card-body">
+            <form method="get" action="{% url 'lookup:table_detail' table_name %}" class="row g-3">
+                <div class="col-md-8">
+                    <div class="input-group">
+                        <span class="input-group-text"><i class="bi bi-search"></i></span>
+                        <input type="text" class="form-control" name="search" value="{{ search }}"
+                               placeholder="Search across all text columns...">
+                    </div>
+                </div>
+                <div class="col-md-4 d-flex gap-2">
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-search"></i> Search
+                    </button>
+                    <a href="{% url 'lookup:table_detail' table_name %}" class="btn btn-outline-secondary">
+                        <i class="bi bi-x-circle"></i> Clear
+                    </a>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Data Table with Inline Editing -->
+    <div class="card">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <h5 class="card-title mb-0">
+                <i class="bi bi-list-ul"></i> Data
+                <span class="badge badge-primary ms-2">{{ total_count }} rows</span>
+            </h5>
+            <small class="text-muted"><i class="bi bi-info-circle"></i> Click on a row to edit, or use the + button to add new rows</small>
+        </div>
+        <div class="card-body p-0">
+            <div class="table-responsive" style="overflow-x: auto; max-height: 600px;">
+                <table class="table table-hover table-sm mb-0" id="lookupTable">
+                    <thead class="table-light" style="position: sticky; top: 0; z-index: 10;">
+                        <tr>
+                            {% for col in columns %}
+                            <th data-column="{{ col.name }}" data-type="{{ col.type }}">
+                                {{ col.display_name }}
+                                {% if col.name == pk_column %}
+                                    <i class="bi bi-key-fill text-warning" title="Primary Key"></i>
+                                {% endif %}
+                            </th>
+                            {% endfor %}
+                            <th class="sticky-action-column" style="min-width: 100px;">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tableBody">
+                        <!-- rows rendered by JS from rows_json to avoid template filter issues -->
+                    </tbody>
+                    <tfoot>
+                        <tr id="addRowBtn" class="table-light" style="cursor: pointer;">
+                            <td colspan="{{ columns|length|add:1 }}" class="text-center py-2">
+                                <button type="button" class="btn btn-sm btn-outline-primary" id="addNewRowBtn">
+                                    <i class="bi bi-plus-circle"></i> Add New Row
+                                </button>
+                            </td>
+                        </tr>
+                    </tfoot>
+                </table>
+            </div>
+
+            <!-- Pagination -->
+            {% if total_pages > 1 %}
+            <div class="card-footer">
+                <nav aria-label="Lookup pagination">
+                    <ul class="pagination justify-content-center mb-0">
+                        {% if has_previous %}
+                            <li class="page-item">
+                                <a class="page-link" href="?page=1{% if search %}&search={{ search }}{% endif %}">First</a>
+                            </li>
+                            <li class="page-item">
+                                <a class="page-link" href="?page={{ previous_page }}{% if search %}&search={{ search }}{% endif %}">Previous</a>
+                            </li>
+                        {% endif %}
+
+                        <li class="page-item active">
+                            <span class="page-link">
+                                Page {{ page }} of {{ total_pages }}
+                            </span>
+                        </li>
+
+                        {% if has_next %}
+                            <li class="page-item">
+                                <a class="page-link" href="?page={{ next_page }}{% if search %}&search={{ search }}{% endif %}">Next</a>
+                            </li>
+                            <li class="page-item">
+                                <a class="page-link" href="?page={{ total_pages }}{% if search %}&search={{ search }}{% endif %}">Last</a>
+                            </li>
+                        {% endif %}
+                    </ul>
+                </nav>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Column Info -->
+    <div class="card mt-4">
+        <div class="card-header">
+            <h5 class="card-title mb-0">
+                <i class="bi bi-info-circle"></i> Column Information
+            </h5>
+        </div>
+        <div class="card-body">
+            <div class="row">
+                {% for col in columns %}
+                <div class="col-md-3 col-sm-4 mb-2">
+                    <span class="badge {% if col.name == pk_column %}badge-warning{% else %}badge-secondary{% endif %}">
+                        {{ col.type }}
+                    </span>
+                    <code>{{ col.name }}</code>
+                    {% if col.name == pk_column %}
+                        <i class="bi bi-key-fill text-warning" title="Primary Key"></i>
+                    {% endif %}
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Toast for notifications -->
+<div class="position-fixed bottom-0 end-0 p-3" style="z-index: 1100">
+    <div id="saveToast" class="toast align-items-center text-white bg-success border-0" role="alert">
+        <div class="d-flex">
+            <div class="toast-body">
+                <i class="bi bi-check-circle me-2"></i>
+                <span id="toastMessage">Row saved successfully!</span>
+            </div>
+            <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const tableName = '{{ table_name }}';
+    const pkColumn = '{{ pk_column|default:"" }}';
+    // pkColumns intentionally aliased to pkColumn to guard stale references
+    var pkColumns = pkColumn;
+    const columns = {{ columns_json }};
+    const csrfToken = '{{ csrf_token }}';
+    const initialRows = {{ rows_json }};
+
+    const tableBody = document.getElementById('tableBody');
+    const addNewRowBtn = document.getElementById('addNewRowBtn');
+
+    // Render initial rows from JSON (avoids Django template filter issues)
+    function renderInitialRows() {
+        tableBody.innerHTML = '';
+        if (!initialRows || initialRows.length === 0) {
+            tableBody.innerHTML = `<tr class="no-data-row">
+                <td colspan="${columns.length + 1}" class="text-center py-4 text-muted">
+                    <i class="bi bi-inbox" style="font-size:2rem;opacity:0.3;"></i>
+                    <p class="mt-2 mb-0">No data found. Click the + button below to add a row.</p>
+                </td></tr>`;
+            return;
+        }
+        initialRows.forEach(function(row) {
+            const tr = document.createElement('tr');
+            tr.className = 'data-row';
+            tr.dataset.pk = row[pkColumn] != null ? row[pkColumn] : '';
+            columns.forEach(function(col) {
+                const td = document.createElement('td');
+                td.className = 'editable-cell';
+                td.dataset.column = col.name;
+                td.dataset.type = col.type;
+                const val = row[col.name];
+                const colTypeBase = col.type.split('(')[0];
+                if (colTypeBase === 'BOOLEAN' || colTypeBase === 'BOOL') {
+                    td.dataset.original = val ? 'true' : 'false';
+                    td.innerHTML = val
+                        ? '<span class="badge bg-success">Yes</span>'
+                        : '<span class="badge bg-secondary">No</span>';
+                } else {
+                    const displayVal = (val !== null && val !== undefined && val !== '') ? val : '-';
+                    td.dataset.original = (val !== null && val !== undefined) ? String(val) : '';
+                    if (col.name === pkColumn) {
+                        td.dataset.isPk = 'true';
+                        td.innerHTML = `<strong class="text-primary">${displayVal}</strong>`;
+                    } else {
+                        td.textContent = displayVal;
+                    }
+                }
+                tr.appendChild(td);
+            });
+            // Action buttons cell
+            const actionTd = document.createElement('td');
+            actionTd.className = 'sticky-action-column';
+            actionTd.innerHTML = `
+                <div class="btn-group btn-group-sm action-buttons">
+                    <button type="button" class="btn btn-outline-primary btn-edit-row" title="Edit Row"><i class="bi bi-pencil"></i></button>
+                    <button type="button" class="btn btn-outline-danger btn-delete-row" title="Delete Row"><i class="bi bi-trash"></i></button>
+                </div>
+                <div class="btn-group btn-group-sm edit-buttons" style="display:none;">
+                    <button type="button" class="btn btn-success btn-save-row" title="Save"><i class="bi bi-check-lg"></i></button>
+                    <button type="button" class="btn btn-secondary btn-cancel-row" title="Cancel"><i class="bi bi-x-lg"></i></button>
+                </div>`;
+            tr.appendChild(actionTd);
+            tableBody.appendChild(tr);
+        });
+    }
+    renderInitialRows();
+
+    // Get column info
+    function getColumnInfo() {
+        const cols = [];
+        document.querySelectorAll('#lookupTable thead th[data-column]').forEach(th => {
+            cols.push({
+                name: th.dataset.column,
+                type: th.dataset.type
+            });
+        });
+        return cols;
+    }
+
+    // Create input element based on column type
+    function createInputForType(colName, colType, value, isPk, isNew) {
+        let input;
+
+        const colTypeBase = colType.split('(')[0];
+        if (colTypeBase === 'BOOLEAN' || colTypeBase === 'BOOL') {
+            input = document.createElement('select');
+            input.className = 'form-select form-select-sm';
+            // Normalize the value to check for truthiness
+            const isTrueValue = value === true || value === 'true' || value === 'True' || value === '1';
+            input.innerHTML = `
+                <option value="true" ${isTrueValue ? 'selected' : ''}>Yes</option>
+                <option value="false" ${!isTrueValue ? 'selected' : ''}>No</option>
+            `;
+        } else if (colTypeBase === 'INT' || colTypeBase === 'INTEGER' || colTypeBase === 'BIGINT' || colTypeBase === 'SMALLINT' || colTypeBase === 'TINYINT') {
+            input = document.createElement('input');
+            input.type = 'number';
+            input.className = 'form-control form-control-sm';
+            input.value = value || '';
+        } else if (colTypeBase === 'FLOAT' || colTypeBase === 'DOUBLE' || colTypeBase === 'DECIMAL' || colTypeBase === 'REAL') {
+            input = document.createElement('input');
+            input.type = 'number';
+            input.step = 'any';
+            input.className = 'form-control form-control-sm';
+            input.value = value || '';
+        } else {
+            input = document.createElement('input');
+            input.type = 'text';
+            input.className = 'form-control form-control-sm';
+            input.value = value === '-' ? '' : (value || '');
+        }
+
+        input.dataset.column = colName;
+
+        // PK field is readonly when editing existing row
+        if (isPk && !isNew) {
+            input.readOnly = true;
+            input.classList.add('bg-light');
+        }
+
+        // PK field is required
+        if (isPk) {
+            input.required = true;
+        }
+
+        return input;
+    }
+
+    // Get display value for cell
+    function getDisplayValue(colType, value) {
+        if (colType === 'BOOLEAN' || colType === 'BOOL') {
+            const isTrueValue = value === true || value === 'true' || value === 'True' || value === '1';
+            if (isTrueValue) {
+                return '<span class="badge badge-success">Yes</span>';
+            } else {
+                return '<span class="badge badge-secondary">No</span>';
+            }
+        }
+        return value || '-';
+    }
+
+    // Enter edit mode for a row
+    function enterEditMode(row, isNew = false) {
+        // Exit any other row in edit mode
+        document.querySelectorAll('.data-row.editing').forEach(r => {
+            if (r !== row) cancelEdit(r);
+        });
+
+        row.classList.add('editing');
+        row.classList.add('table-warning');
+
+        const cells = row.querySelectorAll('.editable-cell');
+        cells.forEach(cell => {
+            const colName = cell.dataset.column;
+            const colType = cell.dataset.type;
+            const isPk = cell.dataset.isPk === 'true';
+            const originalValue = cell.dataset.original;
+
+            const input = createInputForType(colName, colType, originalValue, isPk, isNew);
+            cell.innerHTML = '';
+            cell.appendChild(input);
+        });
+
+        // Show save/cancel buttons, hide edit/delete buttons
+        row.querySelector('.action-buttons').style.display = 'none';
+        row.querySelector('.edit-buttons').style.display = 'flex';
+
+        // Focus first editable input
+        const firstInput = row.querySelector('input:not([readonly]), select');
+        if (firstInput) firstInput.focus();
+    }
+
+    // Cancel edit mode
+    function cancelEdit(row) {
+        const isNew = row.dataset.isNew === 'true';
+
+        if (isNew) {
+            // Remove the new row
+            row.remove();
+            // Show "no data" row if table is now empty
+            if (tableBody.querySelectorAll('.data-row').length === 0) {
+                const noDataRow = document.createElement('tr');
+                noDataRow.className = 'no-data-row';
+                noDataRow.innerHTML = `
+                    <td colspan="${columns.length + 1}" class="text-center py-4 text-muted">
+                        <i class="bi bi-inbox" style="font-size: 2rem; opacity: 0.3;"></i>
+                        <p class="mt-2 mb-0">No data found. Click the + button below to add a row.</p>
+                    </td>
+                `;
+                tableBody.appendChild(noDataRow);
+            }
+            return;
+        }
+
+        row.classList.remove('editing');
+        row.classList.remove('table-warning');
+
+        // Restore original values
+        const cells = row.querySelectorAll('.editable-cell');
+        cells.forEach(cell => {
+            const colType = cell.dataset.type;
+            const isPk = cell.dataset.isPk === 'true';
+            const originalValue = cell.dataset.original;
+
+            let displayValue = getDisplayValue(colType, originalValue);
+            if (isPk) {
+                displayValue = `<strong class="text-primary">${originalValue || '-'}</strong>`;
+            }
+            cell.innerHTML = displayValue;
+        });
+
+        // Show edit/delete buttons, hide save/cancel buttons
+        row.querySelector('.action-buttons').style.display = 'flex';
+        row.querySelector('.edit-buttons').style.display = 'none';
+    }
+
+    // Save row
+    async function saveRow(row) {
+        const isNew = row.dataset.isNew === 'true';
+        const data = {};
+
+        // Collect values from inputs
+        row.querySelectorAll('.editable-cell input, .editable-cell select').forEach(input => {
+            const colName = input.dataset.column;
+            let value = input.value;
+
+            // Handle boolean
+            if (input.tagName === 'SELECT') {
+                value = input.value === 'true';
+            } else if (value === '') {
+                value = null;
+            }
+
+            data[colName] = value;
+        });
+
+        // Validate PK
+        if (!data[pkColumn]) {
+            showToast('Primary key is required', 'danger');
+            return;
+        }
+
+        try {
+            let url, method;
+            if (isNew) {
+                url = `/lookup/table/${tableName}/create/`;
+                method = 'POST';
+            } else {
+                const pkValue = row.dataset.pk;
+                url = `/lookup/table/${tableName}/edit/${encodeURIComponent(pkValue)}/`;
+                method = 'POST';
+            }
+
+            // Create form data
+            const formData = new FormData();
+            formData.append('csrfmiddlewaretoken', csrfToken);
+
+            // Add all data to form
+            for (const [key, value] of Object.entries(data)) {
+                if (value === true) {
+                    formData.append(key, 'on');
+                } else if (value !== null && value !== false) {
+                    formData.append(key, value);
+                }
+            }
+
+            const response = await fetch(url, {
+                method: method,
+                body: formData,
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest'
+                }
+            });
+
+            if (response.redirected || response.ok) {
+                // Success - reload the page to show updated data
+                showToast(isNew ? 'Row created successfully!' : 'Row updated successfully!', 'success');
+                setTimeout(() => {
+                    window.location.reload();
+                }, 500);
+            } else {
+                const text = await response.text();
+                showToast('Error saving row: ' + (text || 'Unknown error'), 'danger');
+            }
+        } catch (error) {
+            console.error('Save error:', error);
+            showToast('Error saving row: ' + error.message, 'danger');
+        }
+    }
+
+    // Delete row
+    async function deleteRow(row) {
+        const pkValue = row.dataset.pk;
+
+        if (!confirm('Are you sure you want to delete this row?')) {
+            return;
+        }
+
+        try {
+            const formData = new FormData();
+            formData.append('csrfmiddlewaretoken', csrfToken);
+
+            const response = await fetch(`/lookup/table/${tableName}/delete/${encodeURIComponent(pkValue)}/`, {
+                method: 'POST',
+                body: formData,
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest'
+                }
+            });
+
+            if (response.redirected || response.ok) {
+                showToast('Row deleted successfully!', 'success');
+                setTimeout(() => {
+                    window.location.reload();
+                }, 500);
+            } else {
+                showToast('Error deleting row', 'danger');
+            }
+        } catch (error) {
+            console.error('Delete error:', error);
+            showToast('Error deleting row: ' + error.message, 'danger');
+        }
+    }
+
+    // Add new row
+    function addNewRow() {
+        // Remove "no data" row if exists
+        const noDataRow = tableBody.querySelector('.no-data-row');
+        if (noDataRow) noDataRow.remove();
+
+        const newRow = document.createElement('tr');
+        newRow.className = 'data-row';
+        newRow.dataset.isNew = 'true';
+        newRow.dataset.pk = '';
+
+        // Create cells for each column
+        columns.forEach(col => {
+            const cell = document.createElement('td');
+            cell.className = 'editable-cell';
+            cell.dataset.column = col.name;
+            cell.dataset.type = col.type;
+            cell.dataset.original = '';
+            if (col.name === pkColumn) {
+                cell.dataset.isPk = 'true';
+            }
+            newRow.appendChild(cell);
+        });
+
+        // Add action cell
+        const actionCell = document.createElement('td');
+        actionCell.className = 'sticky-action-column';
+        actionCell.innerHTML = `
+            <div class="btn-group btn-group-sm action-buttons" style="display: none;">
+                <button type="button" class="btn btn-outline-primary btn-edit-row" title="Edit Row">
+                    <i class="bi bi-pencil"></i>
+                </button>
+                <button type="button" class="btn btn-outline-danger btn-delete-row" title="Delete Row">
+                    <i class="bi bi-trash"></i>
+                </button>
+            </div>
+            <div class="btn-group btn-group-sm edit-buttons">
+                <button type="button" class="btn btn-success btn-save-row" title="Save">
+                    <i class="bi bi-check-lg"></i>
+                </button>
+                <button type="button" class="btn btn-secondary btn-cancel-row" title="Cancel">
+                    <i class="bi bi-x-lg"></i>
+                </button>
+            </div>
+        `;
+        newRow.appendChild(actionCell);
+
+        // Append to table
+        tableBody.appendChild(newRow);
+
+        // Enter edit mode
+        enterEditMode(newRow, true);
+
+        // Scroll to new row
+        newRow.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+
+    // Show toast notification
+    function showToast(message, type = 'success') {
+        const toast = document.getElementById('saveToast');
+        const toastMessage = document.getElementById('toastMessage');
+
+        toast.classList.remove('bg-success', 'bg-danger', 'bg-warning');
+        toast.classList.add('bg-' + type);
+        toastMessage.textContent = message;
+
+        const bsToast = new bootstrap.Toast(toast);
+        bsToast.show();
+    }
+
+    // Event delegation for buttons
+    tableBody.addEventListener('click', function(e) {
+        const row = e.target.closest('.data-row');
+        if (!row) return;
+
+        if (e.target.closest('.btn-edit-row')) {
+            enterEditMode(row, false);
+        } else if (e.target.closest('.btn-save-row')) {
+            saveRow(row);
+        } else if (e.target.closest('.btn-cancel-row')) {
+            cancelEdit(row);
+        } else if (e.target.closest('.btn-delete-row')) {
+            deleteRow(row);
+        }
+    });
+
+    // Add new row button
+    addNewRowBtn.addEventListener('click', function() {
+        addNewRow();
+    });
+
+    // Keyboard shortcuts
+    document.addEventListener('keydown', function(e) {
+        const editingRow = document.querySelector('.data-row.editing');
+
+        if (editingRow) {
+            if (e.key === 'Escape') {
+                cancelEdit(editingRow);
+            } else if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                saveRow(editingRow);
+            }
+        }
+    });
+});
+</script>
+{% endblock %}

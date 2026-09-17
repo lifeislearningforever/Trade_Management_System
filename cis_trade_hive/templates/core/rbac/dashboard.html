@@ -1,0 +1,83 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}RBAC Admin - CisTrade{% endblock %}
+
+{% block breadcrumb %}
+    <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
+    <li class="breadcrumb-item active">RBAC Admin</li>
+{% endblock %}
+
+{% block content %}
+<div class="content-header">
+    <h1 class="content-title">
+        <i class="bi bi-shield-lock text-primary"></i> RBAC Administration
+    </h1>
+    <p class="content-subtitle">Manage users, groups, and permissions for RBAC v2</p>
+</div>
+
+<div class="row g-3 mb-4">
+    <div class="col-md-4">
+        <div class="card border-primary h-100">
+            <div class="card-body">
+                <div class="d-flex align-items-center mb-2">
+                    <i class="bi bi-people fs-3 text-primary me-3"></i>
+                    <div>
+                        <div class="fs-2 fw-bold text-primary">{{ stats.users }}</div>
+                        <div class="text-muted">Active Users</div>
+                    </div>
+                </div>
+                <a href="{% url 'core:rbac_user_list' %}" class="btn btn-primary btn-sm w-100">Manage Users</a>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card border-success h-100">
+            <div class="card-body">
+                <div class="d-flex align-items-center mb-2">
+                    <i class="bi bi-collection fs-3 text-success me-3"></i>
+                    <div>
+                        <div class="fs-2 fw-bold text-success">{{ stats.groups }}</div>
+                        <div class="text-muted">Active Groups</div>
+                    </div>
+                </div>
+                <a href="{% url 'core:rbac_group_list' %}" class="btn btn-success btn-sm w-100">Manage Groups</a>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card border-warning h-100">
+            <div class="card-body">
+                <div class="d-flex align-items-center mb-2">
+                    <i class="bi bi-key fs-3 text-warning me-3"></i>
+                    <div>
+                        <div class="fs-2 fw-bold text-warning">{{ stats.permissions }}</div>
+                        <div class="text-muted">Permissions</div>
+                    </div>
+                </div>
+                <a href="{% url 'core:rbac_permission_list' %}" class="btn btn-warning btn-sm w-100">Manage Permissions</a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-body">
+        <h6 class="mb-3"><i class="bi bi-info-circle"></i> Quick Actions</h6>
+        <div class="d-flex flex-wrap gap-2">
+            <a href="{% url 'core:rbac_user_create' %}" class="btn btn-outline-primary btn-sm">
+                <i class="bi bi-person-plus"></i> New User
+            </a>
+            <a href="{% url 'core:rbac_group_create' %}" class="btn btn-outline-success btn-sm">
+                <i class="bi bi-plus-circle"></i> New Group
+            </a>
+            <a href="{% url 'core:rbac_permission_create' %}" class="btn btn-outline-warning btn-sm">
+                <i class="bi bi-plus-circle"></i> New Permission
+            </a>
+            <a href="{% url 'core:rbac_audit' %}" class="btn btn-outline-secondary btn-sm">
+                <i class="bi bi-journal-check"></i> View Audit Log
+            </a>
+        </div>
+    </div>
+</div>
+{% endblock %}

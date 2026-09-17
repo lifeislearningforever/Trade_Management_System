@@ -1,0 +1,603 @@
+"""
+Portfolio Repository
+Fetches portfolio data from Kudu cis_portfolio table via Impala.
+Implements Maker-Checker workflow with statuses:
+  - INITIAL: New portfolio created (Maker)
+  - MODIFIED: Portfolio edited (Maker)
+  - PENDING_VALIDATION: Submitted for validation (awaiting Checker)
+  - VALIDATED: Approved by Checker (ready for settlement)
+  - CANCELLED: Rejected/Cancelled
+  - SETTLED: Final active state (settlement complete)
+
+Note: Audit logging is handled by the views layer (portfolio/views.py),
+      not in this repository, to avoid duplicate audit entries.
+"""
+
+from typing import List, Dict, Any, Optional
+import logging
+from datetime import datetime
+from core.repositories.impala_connection import impala_manager
+from django.conf import settings
+
+logger = logging.getLogger(__name__)
+
+
+class PortfolioHiveRepository:
+    """Repository for portfolio operations with Kudu via Impala."""
+
+    DATABASE = settings.IMPALA_CONFIG['DATABASE']
+    TABLE_NAME = 'cis_portfolio'
+
+    # Workflow Status Constants
+    STATUS_INITIAL = 'INITIAL'
+    STATUS_MODIFIED = 'MODIFIED'
+    STATUS_PENDING_VALIDATION = 'PENDING_VALIDATION'
+    STATUS_VALIDATED = 'VALIDATED'
+    STATUS_CANCELLED = 'CANCELLED'
+    STATUS_SETTLED = 'SETTLED'
+
+    # Status groups for filtering
+    # Allow edits during PENDING_VALIDATION (Maker can modify while awaiting approval)
+    MAKER_EDITABLE_STATUSES = [STATUS_INITIAL, STATUS_MODIFIED, STATUS_PENDING_VALIDATION, STATUS_CANCELLED]
+    CHECKER_ACTIONABLE_STATUSES = [STATUS_PENDING_VALIDATION, STATUS_VALIDATED]
+
+    @staticmethod
+    def escape_value(val):
+        """Escape value for SQL query. Impala uses C-style \\' escaping, not doubled quotes."""
+        if val is None:
+            return 'NULL'
+        if isinstance(val, str):
+            s = val.replace('\\', '\\\\').replace(chr(39), '\\' + chr(39))
+            return f"'{s}'"
+        if isinstance(val, bool):
+            return str(val).lower()
+        return str(val)
+
+    @staticmethod
+    def get_all_portfolios(
+        limit: int = 1000,
+        status: Optional[str] = None,
+        currency: Optional[str] = None,
+        search: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Retrieve portfolios from Kudu with filters.
+        Orders by src_system='CIS' first, then by name.
+        """
+        try:
+            where_clauses = []
+
+            if status:
+                status_escaped = status.replace('\\', '\\\\').replace("'", "\\'")
+                where_clauses.append(f"`status` = '{status_escaped}'")
+
+            if currency:
+                currency_escaped = currency.replace('\\', '\\\\').replace("'", "\\'")
+                where_clauses.append(f"`currency` = '{currency_escaped}'")
+
+            if search:
+                search_term = search.replace('\\', '\\\\').replace("'", "\\'")
+                # Case-insensitive search using LOWER() function
+                where_clauses.append(
+                    f"(LOWER(`name`) LIKE LOWER('%{search_term}%') OR "
+                    f"LOWER(`description`) LIKE LOWER('%{search_term}%'))"
+                )
+
+            where_clause = " AND ".join(where_clauses) if where_clauses else "1=1"
+
+            query = f"""
+            SELECT `name`, `description`, `currency`, `manager`, `portfolio_client`,
+                   `settlement_ccy`, `cash_balance_list`, `status`, `cost_centre_code`, `corp_code`,
+                   `account_group`, `portfolio_group`, `report_group`, `entity_group`,
+                   `revaluation_status`, `is_active`, `created_at`, `updated_at`, `updated_by`,
+                   `src_system`, `submitted_by`, `submitted_at`, `validated_by`, `validated_at`,
+                   `settled_by`, `settled_at`, `cancelled_by`, `cancelled_at`, `cancel_reason`,
+                   `entity`, `business_line`, `investment_type`, `branch_code`,
+                   `desk_head`, `portfolio_owner`, `closure_date`, `country`
+            FROM {PortfolioHiveRepository.DATABASE}.{PortfolioHiveRepository.TABLE_NAME}
+            WHERE {where_clause}
+            ORDER BY CASE WHEN UPPER(src_system) = 'CIS' THEN 0 ELSE 1 END, `name`
+            LIMIT {limit}
+            """
+
+            results = impala_manager.execute_query(query, database=PortfolioHiveRepository.DATABASE)
+            return results
+
+        except Exception as e:
+            logger.error(f"Error retrieving portfolios from Kudu: {str(e)}")
+            return []
+
+    @staticmethod
+    def get_portfolios_by_status(statuses: List[str], limit: int = 1000) -> List[Dict[str, Any]]:
+        """Get portfolios filtered by multiple statuses."""
+        try:
+            status_list = ", ".join([f"'{s}'" for s in statuses])
+            query = f"""
+            SELECT *
+            FROM {PortfolioHiveRepository.DATABASE}.{PortfolioHiveRepository.TABLE_NAME}
+            WHERE `status` IN ({status_list})
+            ORDER BY CASE WHEN UPPER(src_system) = 'CIS' THEN 0 ELSE 1 END, `name`
+            LIMIT {limit}
+            """
+            results = impala_manager.execute_query(query, database=PortfolioHiveRepository.DATABASE)
+            return results
+        except Exception as e:
+            logger.error(f"Error retrieving portfolios by status: {str(e)}")
+            return []
+
+    @staticmethod
+    def get_pending_validation_portfolios(limit: int = 1000) -> List[Dict[str, Any]]:
+        """Get portfolios pending validation (for Checker)."""
+        return PortfolioHiveRepository.get_portfolios_by_status(
+            [PortfolioHiveRepository.STATUS_PENDING_VALIDATION], limit
+        )
+
+    @staticmethod
+    def get_validated_portfolios(limit: int = 1000) -> List[Dict[str, Any]]:
+        """Get validated portfolios ready for settlement (for Checker)."""
+        return PortfolioHiveRepository.get_portfolios_by_status(
+            [PortfolioHiveRepository.STATUS_VALIDATED], limit
+        )
+
+    @staticmethod
+    def get_portfolio_statistics() -> Dict[str, Any]:
+        """Get portfolio statistics from Kudu."""
+        try:
+            all_query = f"SELECT `status`, `currency`, `is_active`, `src_system` FROM {PortfolioHiveRepository.DATABASE}.{PortfolioHiveRepository.TABLE_NAME}"
+            all_result = impala_manager.execute_query(all_query, database=PortfolioHiveRepository.DATABASE)
+
+            total_portfolios = len(all_result)
+
+            # Count by status
+            status_counts = {}
+            currency_counts = {}  # For active portfolios by currency
+            all_currency_counts = {}  # For all portfolios by currency
+            active_count = 0
+
+            for row in all_result:
+                status = row.get('status') or 'Unknown'
+                is_active = row.get('is_active')
+                src_system = row.get('src_system', '').upper() if row.get('src_system') else ''
+                curr = row.get('currency') or 'Unknown'
+
+                # Count by status
+                status_counts[status] = status_counts.get(status, 0) + 1
+
+                # Count all portfolios by currency
+                all_currency_counts[curr] = all_currency_counts.get(curr, 0) + 1
+
+                # Determine if portfolio is "active":
+                # - CIS portfolios: status == SETTLED
+                # - GMP portfolios: is_active == True OR status is NULL/empty (legacy active)
+                is_portfolio_active = False
+                if src_system == 'CIS':
+                    is_portfolio_active = (status == PortfolioHiveRepository.STATUS_SETTLED)
+                else:
+                    # GMP portfolios: consider active if is_active=True or if no status set (legacy)
+                    is_portfolio_active = (is_active is True) or (status in (None, '', 'Unknown', 'NULL'))
+
+                if is_portfolio_active:
+                    active_count += 1
+                    currency_counts[curr] = currency_counts.get(curr, 0) + 1
+
+            return {
+                'total_portfolios': total_portfolios,
+                'active_portfolios': active_count,
+                'settled_portfolios': status_counts.get(PortfolioHiveRepository.STATUS_SETTLED, 0),
+                'pending_validation': status_counts.get(PortfolioHiveRepository.STATUS_PENDING_VALIDATION, 0),
+                'validated': status_counts.get(PortfolioHiveRepository.STATUS_VALIDATED, 0),
+                'status_breakdown': [
+                    {'status': k, 'count': v}
+                    for k, v in sorted(status_counts.items())
+                ],
+                'currency_breakdown': [
+                    {'currency': k, 'count': v}
+                    for k, v in sorted(currency_counts.items())
+                ],
+                'all_currency_breakdown': [
+                    {'currency': k, 'count': v}
+                    for k, v in sorted(all_currency_counts.items())
+                ]
+            }
+
+        except Exception as e:
+            logger.error(f"Error getting portfolio statistics from Kudu: {str(e)}")
+            return {
+                'total_portfolios': 0,
+                'active_portfolios': 0,
+                'settled_portfolios': 0,
+                'pending_validation': 0,
+                'validated': 0,
+                'status_breakdown': [],
+                'currency_breakdown': [],
+                'all_currency_breakdown': []
+            }
+
+    @staticmethod
+    def get_currencies() -> List[str]:
+        """Get list of unique currencies from portfolios."""
+        try:
+            query = f"SELECT DISTINCT `currency` FROM {PortfolioHiveRepository.DATABASE}.{PortfolioHiveRepository.TABLE_NAME}"
+            results = impala_manager.execute_query(query, database=PortfolioHiveRepository.DATABASE)
+            currencies = [row['currency'] for row in results if row.get('currency')]
+            return sorted(currencies)
+        except Exception as e:
+            logger.error(f"Error getting currencies from Kudu: {str(e)}")
+            return []
+
+    @staticmethod
+    def get_portfolio_by_code(portfolio_code: str) -> Optional[Dict[str, Any]]:
+        """Get portfolio by code/name from Kudu."""
+        try:
+            portfolio_code_escaped = portfolio_code.replace('\\', '\\\\').replace("'", "\\'")
+            query = f"""
+            SELECT *
+            FROM {PortfolioHiveRepository.DATABASE}.{PortfolioHiveRepository.TABLE_NAME}
+            WHERE `name` = '{portfolio_code_escaped}'
+            LIMIT 1
+            """
+            results = impala_manager.execute_query(query, database=PortfolioHiveRepository.DATABASE)
+            return results[0] if results else None
+        except Exception as e:
+            logger.error(f"Error getting portfolio by code from Kudu: {str(e)}")
+            return None
+
+    @staticmethod
+    def get_portfolio_by_code_case_insensitive(portfolio_code: str) -> Optional[Dict[str, Any]]:
+        """Get portfolio by code/name from Kudu (case-insensitive match)."""
+        try:
+            portfolio_code_escaped = portfolio_code.replace('\\', '\\\\').replace("'", "\\'")
+            query = f"""
+            SELECT *
+            FROM {PortfolioHiveRepository.DATABASE}.{PortfolioHiveRepository.TABLE_NAME}
+            WHERE LOWER(`name`) = LOWER('{portfolio_code_escaped}')
+            LIMIT 1
+            """
+            results = impala_manager.execute_query(query, database=PortfolioHiveRepository.DATABASE)
+            return results[0] if results else None
+        except Exception as e:
+            logger.error(f"Error getting portfolio by code (case-insensitive) from Kudu: {str(e)}")
+            return None
+
+    @staticmethod
+    def insert_portfolio(portfolio_data: dict, created_by: str) -> bool:
+        """
+        Insert a new portfolio into Kudu with INITIAL status.
+        Maker action: Create Static/Book Trade -> INITIAL
+        """
+        try:
+            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            escape = PortfolioHiveRepository.escape_value
+            cash_balance_str = str(portfolio_data.get('settlement_ccy', ''))
+
+            query = f"""
+            INSERT INTO {PortfolioHiveRepository.DATABASE}.{PortfolioHiveRepository.TABLE_NAME}
+            (`name`, `description`, `currency`, `manager`, `portfolio_client`,
+             `settlement_ccy`, `cash_balance_list`, `cost_centre_code`, `corp_code`, `account_group`,
+             `portfolio_group`, `report_group`, `entity_group`, `status`,
+             `is_active`, `revaluation_status`, `accounting_section`, `src_system`,
+             `created_by`, `created_at`, `updated_by`, `updated_at`,
+             `entity`, `business_line`, `investment_type`, `branch_code`,
+             `desk_head`, `portfolio_owner`, `closure_date`, `country`)
+            VALUES (
+                {escape(portfolio_data.get('name'))},
+                {escape(portfolio_data.get('description', ''))},
+                {escape(portfolio_data.get('currency'))},
+                {escape(portfolio_data.get('manager'))},
+                {escape(portfolio_data.get('portfolio_client', ''))},
+                {escape(cash_balance_str)},
+                {escape(portfolio_data.get('cash_balance_list', ''))},
+                {escape(portfolio_data.get('cost_centre_code', ''))},
+                {escape(portfolio_data.get('corp_code', ''))},
+                {escape(portfolio_data.get('account_group', ''))},
+                {escape(portfolio_data.get('portfolio_group', ''))},
+                {escape(portfolio_data.get('report_group', ''))},
+                {escape(portfolio_data.get('entity_group', ''))},
+                '{PortfolioHiveRepository.STATUS_INITIAL}',
+                false,
+                {escape(portfolio_data.get('revaluation_status', ''))},
+                {escape(portfolio_data.get('accounting_section', ''))},
+                'CIS',
+                {escape(created_by)},
+                '{timestamp}',
+                {escape(created_by)},
+                '{timestamp}',
+                {escape(portfolio_data.get('entity', ''))},
+                {escape(portfolio_data.get('business_line', ''))},
+                {escape(portfolio_data.get('investment_type', ''))},
+                {escape(portfolio_data.get('branch_code', ''))},
+                {escape(portfolio_data.get('desk_head', ''))},
+                {escape(portfolio_data.get('portfolio_owner', ''))},
+                {escape(portfolio_data.get('closure_date', ''))},
+                {escape(portfolio_data.get('country', ''))}
+            )
+            """
+
+            success = impala_manager.execute_write(query, database=PortfolioHiveRepository.DATABASE)
+            if success:
+                logger.info(f"Created portfolio {portfolio_data.get('name')} with INITIAL status")
+            return success
+
+        except Exception as e:
+            logger.error(f"Error inserting portfolio into Kudu: {str(e)}")
+            return False
+
+    @staticmethod
+    def update_portfolio(portfolio_name: str, portfolio_data: dict, updated_by: str) -> bool:
+        """
+        Update portfolio data. Sets status to MODIFIED.
+        Maker action: Update Static/Trade -> MODIFIED
+        """
+        try:
+            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            escape = PortfolioHiveRepository.escape_value
+            cash_balance_str = str(portfolio_data.get('settlement_ccy', ''))
+
+            query = f"""
+            UPDATE {PortfolioHiveRepository.DATABASE}.{PortfolioHiveRepository.TABLE_NAME}
+            SET `description` = {escape(portfolio_data.get('description', ''))},
+                `currency` = {escape(portfolio_data.get('currency'))},
+                `manager` = {escape(portfolio_data.get('manager'))},
+                `portfolio_client` = {escape(portfolio_data.get('portfolio_client', ''))},
+                `settlement_ccy` = {escape(cash_balance_str)},
+                `cash_balance_list` = {escape(portfolio_data.get('cash_balance_list', ''))},
+                `cost_centre_code` = {escape(portfolio_data.get('cost_centre_code', ''))},
+                `corp_code` = {escape(portfolio_data.get('corp_code', ''))},
+                `account_group` = {escape(portfolio_data.get('account_group', ''))},
+                `portfolio_group` = {escape(portfolio_data.get('portfolio_group', ''))},
+                `report_group` = {escape(portfolio_data.get('report_group', ''))},
+                `entity_group` = {escape(portfolio_data.get('entity_group', ''))},
+                `revaluation_status` = {escape(portfolio_data.get('revaluation_status', ''))},
+                `accounting_section` = {escape(portfolio_data.get('accounting_section', ''))},
+                `entity` = {escape(portfolio_data.get('entity', ''))},
+                `business_line` = {escape(portfolio_data.get('business_line', ''))},
+                `investment_type` = {escape(portfolio_data.get('investment_type', ''))},
+                `branch_code` = {escape(portfolio_data.get('branch_code', ''))},
+                `desk_head` = {escape(portfolio_data.get('desk_head', ''))},
+                `portfolio_owner` = {escape(portfolio_data.get('portfolio_owner', ''))},
+                `closure_date` = {escape(portfolio_data.get('closure_date', ''))},
+                `country` = {escape(portfolio_data.get('country', ''))},
+                `status` = '{PortfolioHiveRepository.STATUS_MODIFIED}',
+                `updated_by` = {escape(updated_by)},
+                `updated_at` = '{timestamp}'
+            WHERE `name` = {escape(portfolio_name)}
+            """
+
+            success = impala_manager.execute_write(query, database=PortfolioHiveRepository.DATABASE)
+            if success:
+                logger.info(f"Updated portfolio {portfolio_name}, status set to MODIFIED")
+            return success
+
+        except Exception as e:
+            logger.error(f"Error updating portfolio: {str(e)}")
+            return False
+
+    @staticmethod
+    def submit_for_validation(portfolio_code: str, submitted_by: str) -> bool:
+        """
+        Submit portfolio for validation.
+        Maker action: Submit -> PENDING_VALIDATION
+        """
+        try:
+            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            escape = PortfolioHiveRepository.escape_value
+
+            query = f"""
+            UPDATE {PortfolioHiveRepository.DATABASE}.{PortfolioHiveRepository.TABLE_NAME}
+            SET `status` = '{PortfolioHiveRepository.STATUS_PENDING_VALIDATION}',
+                `submitted_by` = {escape(submitted_by)},
+                `submitted_at` = '{timestamp}',
+                `updated_by` = {escape(submitted_by)},
+                `updated_at` = '{timestamp}'
+            WHERE `name` = {escape(portfolio_code)}
+            """
+
+            success = impala_manager.execute_write(query, database=PortfolioHiveRepository.DATABASE)
+            if success:
+                logger.info(f"Portfolio {portfolio_code} submitted for validation by {submitted_by}")
+            return success
+
+        except Exception as e:
+            logger.error(f"Error submitting portfolio for validation: {str(e)}")
+            return False
+
+    @staticmethod
+    def validate_portfolio(portfolio_code: str, validated_by: str, comments: str = '') -> bool:
+        """
+        Validate (approve) portfolio.
+        Checker action: Validate -> VALIDATED
+        """
+        try:
+            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            escape = PortfolioHiveRepository.escape_value
+
+            query = f"""
+            UPDATE {PortfolioHiveRepository.DATABASE}.{PortfolioHiveRepository.TABLE_NAME}
+            SET `status` = '{PortfolioHiveRepository.STATUS_VALIDATED}',
+                `validated_by` = {escape(validated_by)},
+                `validated_at` = '{timestamp}',
+                `validation_comments` = {escape(comments)},
+                `updated_by` = {escape(validated_by)},
+                `updated_at` = '{timestamp}'
+            WHERE `name` = {escape(portfolio_code)}
+            """
+
+            success = impala_manager.execute_write(query, database=PortfolioHiveRepository.DATABASE)
+            if success:
+                logger.info(f"Portfolio {portfolio_code} validated by {validated_by}")
+            return success
+
+        except Exception as e:
+            logger.error(f"Error validating portfolio: {str(e)}")
+            return False
+
+    @staticmethod
+    def settle_portfolio(portfolio_code: str, settled_by: str, comments: str = '') -> bool:
+        """
+        Settle (activate) portfolio.
+        Checker action: Settle -> SETTLED (final active state)
+        """
+        try:
+            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            escape = PortfolioHiveRepository.escape_value
+
+            query = f"""
+            UPDATE {PortfolioHiveRepository.DATABASE}.{PortfolioHiveRepository.TABLE_NAME}
+            SET `status` = '{PortfolioHiveRepository.STATUS_SETTLED}',
+                `is_active` = true,
+                `settled_by` = {escape(settled_by)},
+                `settled_at` = '{timestamp}',
+                `settlement_comments` = {escape(comments)},
+                `updated_by` = {escape(settled_by)},
+                `updated_at` = '{timestamp}'
+            WHERE `name` = {escape(portfolio_code)}
+            """
+
+            success = impala_manager.execute_write(query, database=PortfolioHiveRepository.DATABASE)
+            if success:
+                logger.info(f"Portfolio {portfolio_code} settled by {settled_by}")
+            return success
+
+        except Exception as e:
+            logger.error(f"Error settling portfolio: {str(e)}")
+            return False
+
+    @staticmethod
+    def cancel_portfolio(portfolio_code: str, cancelled_by: str, reason: str = '') -> bool:
+        """
+        Cancel portfolio.
+        Maker action: Cancel Trade -> CANCELLED
+        Checker action: Reject -> CANCELLED
+        """
+        try:
+            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            escape = PortfolioHiveRepository.escape_value
+
+            query = f"""
+            UPDATE {PortfolioHiveRepository.DATABASE}.{PortfolioHiveRepository.TABLE_NAME}
+            SET `status` = '{PortfolioHiveRepository.STATUS_CANCELLED}',
+                `is_active` = false,
+                `cancelled_by` = {escape(cancelled_by)},
+                `cancelled_at` = '{timestamp}',
+                `cancel_reason` = {escape(reason)},
+                `updated_by` = {escape(cancelled_by)},
+                `updated_at` = '{timestamp}'
+            WHERE `name` = {escape(portfolio_code)}
+            """
+
+            success = impala_manager.execute_write(query, database=PortfolioHiveRepository.DATABASE)
+            if success:
+                logger.info(f"Portfolio {portfolio_code} cancelled by {cancelled_by}")
+            return success
+
+        except Exception as e:
+            logger.error(f"Error cancelling portfolio: {str(e)}")
+            return False
+
+    @staticmethod
+    def reactivate_portfolio(portfolio_code: str, reactivated_by: str, comments: str = '') -> bool:
+        """
+        Reactivate cancelled portfolio (sets back to INITIAL for re-submission).
+        """
+        try:
+            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            escape = PortfolioHiveRepository.escape_value
+
+            query = f"""
+            UPDATE {PortfolioHiveRepository.DATABASE}.{PortfolioHiveRepository.TABLE_NAME}
+            SET `status` = '{PortfolioHiveRepository.STATUS_INITIAL}',
+                `is_active` = false,
+                `cancelled_by` = NULL,
+                `cancelled_at` = NULL,
+                `cancel_reason` = NULL,
+                `updated_by` = {escape(reactivated_by)},
+                `updated_at` = '{timestamp}'
+            WHERE `name` = {escape(portfolio_code)}
+            """
+
+            success = impala_manager.execute_write(query, database=PortfolioHiveRepository.DATABASE)
+            if success:
+                logger.info(f"Portfolio {portfolio_code} reactivated by {reactivated_by}")
+            return success
+
+        except Exception as e:
+            logger.error(f"Error reactivating portfolio: {str(e)}")
+            return False
+
+    @staticmethod
+    def update_portfolio_status(
+        portfolio_code: str,
+        status: str,
+        is_active: bool,
+        updated_by: str
+    ) -> bool:
+        """Legacy method for backward compatibility."""
+        try:
+            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            escape = PortfolioHiveRepository.escape_value
+
+            query = f"""
+            UPDATE {PortfolioHiveRepository.DATABASE}.{PortfolioHiveRepository.TABLE_NAME}
+            SET `status` = {escape(status)},
+                `is_active` = {str(is_active).lower()},
+                `updated_by` = {escape(updated_by)},
+                `updated_at` = '{timestamp}'
+            WHERE `name` = {escape(portfolio_code)}
+            """
+
+            success = impala_manager.execute_write(query, database=PortfolioHiveRepository.DATABASE)
+            if success:
+                logger.info(f"Updated portfolio {portfolio_code} status to {status}")
+            return success
+
+        except Exception as e:
+            logger.error(f"Error updating portfolio status: {str(e)}")
+            return False
+
+    @staticmethod
+    def insert_portfolio_history(
+        portfolio_code: str,
+        action: str,
+        status: str,
+        changes: Dict[str, Any],
+        comments: str,
+        performed_by: str
+    ) -> bool:
+        """Insert portfolio history record into Kudu."""
+        try:
+            import json
+            import uuid
+
+            history_id = int(datetime.now().timestamp() * 1000) + (uuid.uuid4().int % 1000)
+            created_at = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            escape = PortfolioHiveRepository.escape_value
+
+            changes_json = json.dumps(changes).replace('\\', '\\\\').replace("'", "\\'")
+
+            query = f"""
+            UPSERT INTO {PortfolioHiveRepository.DATABASE}.cis_portfolio_history
+            (`history_id`, `portfolio_code`, `action`, `status`, `changes`, `comments`, `performed_by`, `created_at`)
+            VALUES (
+                {history_id},
+                {escape(portfolio_code)},
+                {escape(action)},
+                {escape(status)},
+                '{changes_json}',
+                {escape(comments)},
+                {escape(performed_by)},
+                '{created_at}'
+            )
+            """
+
+            success = impala_manager.execute_write(query, database=PortfolioHiveRepository.DATABASE)
+            if success:
+                logger.info(f"Inserted portfolio history for {portfolio_code} - {action}")
+            return success
+
+        except Exception as e:
+            logger.error(f"Error inserting portfolio history: {str(e)}")
+            return False
+
+
+# Singleton instance
+portfolio_hive_repository = PortfolioHiveRepository()

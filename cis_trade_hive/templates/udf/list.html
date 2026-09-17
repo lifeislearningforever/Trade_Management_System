@@ -1,0 +1,367 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}{{ page_title }}{% endblock %}
+
+{% block breadcrumb %}
+    <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
+    <li class="breadcrumb-item">Configuration</li>
+    <li class="breadcrumb-item active">User Defined Fields</li>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-4">
+    <!-- Header -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="d-flex justify-content-between align-items-center">
+                <div>
+                    <h1 class="h3 mb-1">UDF Fields</h1>
+                    <p class="text-muted mb-0">Manage user-defined fields</p>
+                </div>
+                <div>
+                    <a href="{% url 'udf:create' %}" class="btn btn-primary" id="addFieldBtn">
+                        <i class="bi bi-plus-circle me-1"></i> Add Field Value
+                    </a>
+                    <a href="{% url 'udf:dashboard' %}" class="btn btn-outline-secondary">
+                        <i class="bi bi-grid me-1"></i> Dashboard
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Filters -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card shadow-sm border-0">
+                <div class="card-body">
+                    <form method="get" action="{% url 'udf:list' %}" id="filterForm" class="row g-3">
+                        <!-- Object Type Filter (Dropdown 1) -->
+                        <div class="col-12 col-md-3">
+                            <label for="object_type" class="form-label small text-muted">Object Type</label>
+                            <select class="form-select" id="object_type" name="object_type">
+                                <option value="">All Object Types</option>
+                                {% for object_type in object_types %}
+                                <option value="{{ object_type }}"
+                                        {% if object_type_filter == object_type %}selected{% endif %}>
+                                    {{ object_type }}
+                                </option>
+                                {% endfor %}
+                            </select>
+                        </div>
+
+                        <!-- Field Name Filter (Dropdown 2 - Cascading) -->
+                        <div class="col-12 col-md-3">
+                            <label for="field_name" class="form-label small text-muted">Field Name</label>
+                            <select class="form-select" id="field_name" name="field_name">
+                                <option value="">All Field Names</option>
+                            </select>
+                        </div>
+
+                        <!-- Status Filter (Dropdown 3) -->
+                        <div class="col-12 col-md-3">
+                            <label for="status" class="form-label small text-muted">Status</label>
+                            <select class="form-select" id="status" name="status">
+                                <option value="active" {% if status_filter == 'active' %}selected{% endif %}>
+                                    Active
+                                </option>
+                                <option value="inactive" {% if status_filter == 'inactive' %}selected{% endif %}>
+                                    Inactive
+                                </option>
+                                <option value="all" {% if status_filter == 'all' %}selected{% endif %}>
+                                    All
+                                </option>
+                            </select>
+                        </div>
+
+                        <!-- Action Buttons -->
+                        <div class="col-12 col-md-3">
+                            <label class="form-label small text-muted d-block">&nbsp;</label>
+                            <div class="d-flex gap-2">
+                                <button type="submit" class="btn btn-primary flex-fill">
+                                    <i class="bi bi-search me-1"></i> Search
+                                </button>
+                                <a href="{% url 'udf:list' %}" class="btn btn-outline-secondary">
+                                    <i class="bi bi-x-circle"></i>
+                                </a>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Results Count -->
+    <div class="row mb-3">
+        <div class="col-12">
+            <p class="text-muted mb-0">
+                <strong>{{ fields|length }}</strong> field{{ fields|length|pluralize }} found
+            </p>
+        </div>
+    </div>
+
+    <!-- Table -->
+    <div class="row">
+        <div class="col-12">
+            <div class="card shadow-sm border-0">
+                <div class="card-body p-0">
+                    <div class="table-responsive" style="overflow-x: auto; overflow-y: auto; max-height: 600px;">
+                        <table class="table table-hover mb-0" style="min-width: 800px;">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>Object Type</th>
+                                    <th>Field Name</th>
+                                    <th>Value</th>
+                                    <th class="text-center">Status</th>
+                                    <th class="text-end">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for field in fields %}
+                                <tr class="{% if not field.is_active %}table-secondary{% endif %}">
+                                    <td>
+                                        <span class="badge bg-info">{{ field.object_type }}</span>
+                                    </td>
+                                    <td>
+                                        <span class="badge bg-primary">{{ field.field_name }}</span>
+                                    </td>
+                                    <td><code class="text-dark">{{ field.field_value|default:'-' }}</code></td>
+                                    <td class="text-center">
+                                        {% if field.is_active %}
+                                        <span class="badge bg-success">Active</span>
+                                        {% else %}
+                                        <span class="badge bg-secondary">Inactive</span>
+                                        {% endif %}
+                                    </td>
+                                    <td class="text-end">
+                                        <div class="btn-group btn-group-sm" role="group">
+                                            <a href="{% url 'udf:edit' field.udf_id %}"
+                                               class="btn btn-outline-primary"
+                                               title="Edit">
+                                                <i class="bi bi-pencil"></i>
+                                            </a>
+
+                                            {% if field.is_active %}
+                                            <button type="button"
+                                                    class="btn btn-outline-danger"
+                                                    title="Delete"
+                                                    onclick="confirmDelete('{{ field.udf_id }}', '{{ field.field_value|escapejs }}')">
+                                                <i class="bi bi-trash"></i>
+                                            </button>
+                                            {% else %}
+                                            <button type="button"
+                                                    class="btn btn-outline-success"
+                                                    title="Restore"
+                                                    onclick="confirmRestore('{{ field.udf_id }}', '{{ field.field_value|escapejs }}')">
+                                                <i class="bi bi-arrow-counterclockwise"></i>
+                                            </button>
+                                            {% endif %}
+                                        </div>
+                                    </td>
+                                </tr>
+                                {% empty %}
+                                <tr>
+                                    <td colspan="5" class="text-center text-muted py-4">
+                                        <i class="bi bi-inbox fs-1 d-block mb-2"></i>
+                                        No fields found. Try adjusting your filters or
+                                        <a href="{% url 'udf:create' %}">add a new field value</a>.
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Delete Confirmation Modal -->
+<div class="modal fade" id="deleteModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Confirm Delete</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p>Are you sure you want to delete the UDF field <strong id="deleteFieldName"></strong>?</p>
+                <p class="text-muted small mb-0">This is a soft delete - the field will be marked as inactive and can be restored later.</p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <form id="deleteForm" method="post" class="d-inline">
+                    {% csrf_token %}
+                    <button type="submit" class="btn btn-danger">Delete</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Restore Confirmation Modal -->
+<div class="modal fade" id="restoreModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Confirm Restore</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p>Are you sure you want to restore the UDF field <strong id="restoreFieldName"></strong>?</p>
+                <p class="text-muted small mb-0">The field will be reactivated and available for use.</p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <form id="restoreForm" method="post" class="d-inline">
+                    {% csrf_token %}
+                    <button type="submit" class="btn btn-success">Restore</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+function confirmDelete(udfId, fieldLabel) {
+    const modal = new bootstrap.Modal(document.getElementById('deleteModal'));
+    document.getElementById('deleteFieldName').textContent = fieldLabel;
+    document.getElementById('deleteForm').action = `/udf/${udfId}/delete/`;
+    modal.show();
+}
+
+function confirmRestore(udfId, fieldLabel) {
+    const modal = new bootstrap.Modal(document.getElementById('restoreModal'));
+    document.getElementById('restoreFieldName').textContent = fieldLabel;
+    document.getElementById('restoreForm').action = `/udf/${udfId}/restore/`;
+    modal.show();
+}
+
+// Cascading Dropdown Logic for Filters
+(function() {
+    'use strict';
+
+    const objectTypeSelect = document.getElementById('object_type');
+    const fieldNameSelect = document.getElementById('field_name');
+    const addFieldBtn = document.getElementById('addFieldBtn');
+
+    // Store pre-selected values from URL
+    const preSelectedObjectType = "{{ object_type_filter|default:'' }}";
+    const preSelectedFieldName = "{{ field_name_filter|default:'' }}";
+
+    /**
+     * Load field names based on selected object type
+     */
+    function loadFieldNamesByObjectType(objectType, callback) {
+        if (!objectType) {
+            fieldNameSelect.innerHTML = '<option value="">All Field Names</option>';
+            fieldNameSelect.disabled = false;
+            return;
+        }
+
+        // Show loading state
+        fieldNameSelect.innerHTML = '<option value="">Loading...</option>';
+        fieldNameSelect.disabled = true;
+
+        // Fetch fields from API
+        fetch(`/udf/api/fields/${objectType}/`)
+            .then(response => response.json())
+            .then(data => {
+                if (data.success && data.fields) {
+                    // Clear and populate dropdown
+                    fieldNameSelect.innerHTML = '<option value="">All Field Names</option>';
+
+                    if (data.fields.length > 0) {
+                        // Populate options
+                        data.fields.forEach(field => {
+                            const option = document.createElement('option');
+                            option.value = field.field_name;
+                            option.textContent = `${field.field_name}`;
+                            fieldNameSelect.appendChild(option);
+                        });
+
+                        // Restore pre-selected value if exists
+                        if (preSelectedFieldName && callback) {
+                            fieldNameSelect.value = preSelectedFieldName;
+                        }
+                    }
+
+                    fieldNameSelect.disabled = false;
+
+                    if (callback) callback();
+                } else {
+                    fieldNameSelect.innerHTML = '<option value="">All Field Names</option>';
+                    fieldNameSelect.disabled = false;
+                    console.error('Error loading fields:', data.error);
+                }
+            })
+            .catch(error => {
+                fieldNameSelect.innerHTML = '<option value="">All Field Names</option>';
+                fieldNameSelect.disabled = false;
+                console.error('Error fetching fields:', error);
+            });
+    }
+
+    /**
+     * Update Add Field Value button URL with current filter values
+     */
+    function updateAddFieldButtonUrl() {
+        const selectedObjectType = objectTypeSelect.value;
+        const selectedFieldName = fieldNameSelect.value;
+
+        let url = "{% url 'udf:create' %}";
+        const params = [];
+
+        if (selectedObjectType) {
+            params.push(`object_type=${encodeURIComponent(selectedObjectType)}`);
+        }
+        if (selectedFieldName) {
+            params.push(`field_name=${encodeURIComponent(selectedFieldName)}`);
+        }
+
+        if (params.length > 0) {
+            url += '?' + params.join('&');
+        }
+
+        addFieldBtn.href = url;
+    }
+
+    /**
+     * Event listener: Object Type change
+     */
+    objectTypeSelect.addEventListener('change', function() {
+        const selectedObjectType = this.value;
+        loadFieldNamesByObjectType(selectedObjectType);
+        updateAddFieldButtonUrl();
+    });
+
+    /**
+     * Event listener: Field Name change
+     */
+    fieldNameSelect.addEventListener('change', function() {
+        updateAddFieldButtonUrl();
+    });
+
+    /**
+     * Initialize on page load
+     */
+    document.addEventListener('DOMContentLoaded', function() {
+        // If object type is pre-selected, load its fields
+        if (preSelectedObjectType) {
+            loadFieldNamesByObjectType(preSelectedObjectType, function() {
+                // After fields loaded, restore pre-selected field name
+                if (preSelectedFieldName) {
+                    fieldNameSelect.value = preSelectedFieldName;
+                }
+                updateAddFieldButtonUrl();
+            });
+        } else {
+            updateAddFieldButtonUrl();
+        }
+    });
+})();
+</script>
+{% endblock %}

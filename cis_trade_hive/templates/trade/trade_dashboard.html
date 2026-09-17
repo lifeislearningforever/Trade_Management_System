@@ -1,0 +1,154 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Trade Dashboard - CisTrade{% endblock %}
+
+{% block breadcrumb %}
+    <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
+    <li class="breadcrumb-item"><a href="{% url 'trade:list' %}">Trades</a></li>
+    <li class="breadcrumb-item active">Dashboard</li>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-0">
+
+    <!-- Page header -->
+    <div class="d-flex align-items-center justify-content-between mb-4">
+        <div>
+            <h1 class="h4 mb-0 fw-semibold">
+                <i class="bi bi-graph-up text-primary me-2"></i>Trade Dashboard
+            </h1>
+            <p class="text-muted small mb-0">Overview of trade workflow</p>
+        </div>
+        <a href="{% url 'trade:create' %}" class="btn btn-sm btn-primary">
+            <i class="bi bi-plus-lg"></i> New Trade
+        </a>
+    </div>
+
+    <!-- KPI stat cards -->
+    <div class="row g-3 mb-4">
+
+        <!-- Total Trades -->
+        <div class="col-6 col-md-3">
+            <a href="{% url 'trade:list' %}" class="text-decoration-none">
+                <div class="card stats-card h-100" style="cursor:pointer;">
+                    <div class="card-body">
+                        <div class="d-flex align-items-center">
+                            <div class="stats-icon bg-primary">
+                                <i class="bi bi-receipt"></i>
+                            </div>
+                            <div class="ms-3">
+                                <h6 class="text-muted mb-1">Total Trades</h6>
+                                <h3 class="mb-0" id="kpi-total">—</h3>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </a>
+        </div>
+
+        <!-- Pending Validation -->
+        <div class="col-6 col-md-3">
+            <a href="{% url 'trade:pending_validation' %}" class="text-decoration-none">
+                <div class="card stats-card h-100" style="cursor:pointer;">
+                    <div class="card-body">
+                        <div class="d-flex align-items-center">
+                            <div class="stats-icon bg-warning">
+                                <i class="bi bi-hourglass-split"></i>
+                            </div>
+                            <div class="ms-3">
+                                <h6 class="text-muted mb-1">Pending Validation</h6>
+                                <h3 class="mb-0" id="kpi-pending-val">—</h3>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </a>
+        </div>
+
+        <!-- Pending Settlement -->
+        <div class="col-6 col-md-3">
+            <a href="{% url 'trade:pending_settlement' %}" class="text-decoration-none">
+                <div class="card stats-card h-100" style="cursor:pointer;">
+                    <div class="card-body">
+                        <div class="d-flex align-items-center">
+                            <div class="stats-icon bg-info">
+                                <i class="bi bi-check2-circle"></i>
+                            </div>
+                            <div class="ms-3">
+                                <h6 class="text-muted mb-1">Pending Settlement</h6>
+                                <h3 class="mb-0" id="kpi-pending-settle">—</h3>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </a>
+        </div>
+
+        <!-- Settled -->
+        <div class="col-6 col-md-3">
+            <a href="{% url 'trade:list' %}?status=SETTLED" class="text-decoration-none">
+                <div class="card stats-card h-100" style="cursor:pointer;">
+                    <div class="card-body">
+                        <div class="d-flex align-items-center">
+                            <div class="stats-icon bg-success">
+                                <i class="bi bi-check-circle-fill"></i>
+                            </div>
+                            <div class="ms-3">
+                                <h6 class="text-muted mb-1">Settled</h6>
+                                <h3 class="mb-0" id="kpi-settled">—</h3>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </a>
+        </div>
+
+    </div>
+
+    <!-- Quick action buttons -->
+    <div class="mb-4">
+        <a href="{% url 'trade:list' %}" class="btn btn-outline-primary btn-sm me-1">
+            <i class="bi bi-list"></i> All Trades
+        </a>
+        <a href="{% url 'trade:pending_validation' %}" class="btn btn-warning btn-sm me-1">
+            <i class="bi bi-clock-history"></i> Pending Validation
+        </a>
+        <a href="{% url 'trade:pending_settlement' %}" class="btn btn-info btn-sm me-1">
+            <i class="bi bi-check2-circle"></i> Pending Settlement
+        </a>
+    </div>
+
+    <!-- Four-Eyes info -->
+    <div class="alert alert-info small mb-0">
+        <i class="bi bi-info-circle me-1"></i>
+        <strong>Four-Eyes Workflow:</strong>
+        <span class="ms-1">
+            MAKER: Create → <span class="badge bg-secondary">INITIAL</span>
+            → Edit → <span class="badge bg-info text-dark">MODIFIED</span>
+            &nbsp;|&nbsp;
+            CHECKER: Validate → <span class="badge bg-primary">VALIDATED</span>
+            → Settle → <span class="badge bg-success">SETTLED</span>
+        </span>
+        <span class="ms-2 text-muted">(Makers cannot validate their own trades)</span>
+    </div>
+
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+    fetch('{% url "trade:api_statistics" %}')
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+            function fmt(n) { return Number(n || 0).toLocaleString(); }
+            document.getElementById('kpi-total').textContent         = fmt(d.total_trades);
+            document.getElementById('kpi-pending-val').textContent   = fmt(d.pending_validation);
+            document.getElementById('kpi-pending-settle').textContent = fmt(d.pending_settlement);
+            document.getElementById('kpi-settled').textContent       = fmt(d.settled);
+        })
+        .catch(function () {});
+})();
+</script>
+{% endblock %}

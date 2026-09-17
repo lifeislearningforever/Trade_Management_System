@@ -1,0 +1,309 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Corporate Action {{ corporate_action.ca_number }} - CisTrade{% endblock %}
+
+{% block breadcrumb %}
+    <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
+    <li class="breadcrumb-item"><a href="#">Reference Data</a></li>
+    <li class="breadcrumb-item"><a href="{% url 'reference_data:corporate_action_list' %}">Corporate Actions</a></li>
+    <li class="breadcrumb-item active">{{ corporate_action.ca_number }}</li>
+{% endblock %}
+
+{% block content %}
+<div class="corporate-action-detail-container" style="max-width: 1200px; margin: 0 auto;">
+    <!-- Page Header -->
+    <div class="content-header d-flex justify-content-between align-items-start mb-4">
+        <div>
+            <h1 class="content-title">
+                <i class="bi bi-calendar-event text-primary"></i>
+                {{ corporate_action.ca_number }}
+            </h1>
+            <p class="content-subtitle">
+                {{ corporate_action.ca_type_label|default:corporate_action.ca_type }} for {{ corporate_action.security_name }}
+            </p>
+        </div>
+        <div class="d-flex gap-2">
+            {% if can_edit %}
+                <a href="{% url 'reference_data:corporate_action_edit' corporate_action.ca_id %}" class="btn btn-primary">
+                    <i class="bi bi-pencil"></i> Edit
+                </a>
+            {% endif %}
+            <a href="{% url 'reference_data:corporate_action_list' %}" class="btn btn-outline-secondary">
+                <i class="bi bi-arrow-left"></i> Back to List
+            </a>
+        </div>
+    </div>
+
+    <div class="row">
+        <!-- Main Information -->
+        <div class="col-lg-8">
+            <!-- Basic Info Card -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">
+                        <i class="bi bi-info-circle"></i> Corporate Action Details
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="text-muted small">CA Number</label>
+                            <p class="mb-2 fw-bold">{{ corporate_action.ca_number|default:"-" }}</p>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="text-muted small">CA Type</label>
+                            <p class="mb-2 fw-bold">{{ corporate_action.ca_type_label|default:corporate_action.ca_type|default:"-" }}</p>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="text-muted small">Security</label>
+                            <p class="mb-2 fw-bold text-primary">{{ corporate_action.security_name|default:"-" }}</p>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="text-muted small">Security Full Name</label>
+                            <p class="mb-2 fw-bold">{{ corporate_action.security_full_name|default:"-" }}</p>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="text-muted small">Source System</label>
+                            <p class="mb-2">
+                                {% if corporate_action.src_system|upper == 'CIS' %}
+                                    <span class="badge badge-success">CIS</span>
+                                {% else %}
+                                    <span class="badge badge-secondary">{{ corporate_action.src_system|upper|default:"External" }}</span>
+                                {% endif %}
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Dates Card -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">
+                        <i class="bi bi-calendar3"></i> Key Dates
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="row g-3">
+                        <div class="col-md-4">
+                            <label class="text-muted small">Announcement Date</label>
+                            <p class="mb-2 fw-bold">{{ corporate_action.announcement_date|default:"-" }}</p>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="text-muted small">Ex Date</label>
+                            <p class="mb-2 fw-bold">{{ corporate_action.ex_date|default:"-" }}</p>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="text-muted small">Record Date</label>
+                            <p class="mb-2 fw-bold">{{ corporate_action.record_date|default:"-" }}</p>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="text-muted small">Payment Date</label>
+                            <p class="mb-2 fw-bold">{{ corporate_action.payment_date|default:"-" }}</p>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="text-muted small">Effective Date</label>
+                            <p class="mb-2 fw-bold">{{ corporate_action.effective_date|default:"-" }}</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Subscription Period Card (Only for Rights/Warrant Entitlement) -->
+            {% if corporate_action.ca_type == 'RIGHTS_ENTITLEMENT' or corporate_action.ca_type == 'WARRANT_ENTITLEMENT' %}
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">
+                        <i class="bi bi-calendar-range"></i> Subscription Period
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="text-muted small">Start Date</label>
+                            <p class="mb-2 fw-bold">{{ corporate_action.subscription_start_date|default:"-" }}</p>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="text-muted small">End Date</label>
+                            <p class="mb-2 fw-bold">{{ corporate_action.subscription_end_date|default:"-" }}</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+
+            <!-- Price Information Card -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">
+                        <i class="bi bi-currency-dollar"></i> Price Information
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="text-muted small">Price</label>
+                            <p class="mb-2 fw-bold fs-5">{{ corporate_action.price|default:"0.00" }}</p>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="text-muted small">Currency</label>
+                            <p class="mb-2 fw-bold">{{ corporate_action.currency|default:"-" }}</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- History Card -->
+            {% if history %}
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">
+                        <i class="bi bi-clock-history"></i> History
+                    </h5>
+                </div>
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-sm mb-0">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>Action</th>
+                                    <th>Status</th>
+                                    <th>By</th>
+                                    <th>Date</th>
+                                    <th>Comments</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for h in history %}
+                                <tr>
+                                    <td>
+                                        <span class="badge badge-{% if h.action == 'CREATE' %}primary{% elif h.action == 'UPDATE' %}info{% elif h.action == 'VALIDATE' %}success{% elif h.action == 'REJECT' %}danger{% else %}secondary{% endif %}">
+                                            {{ h.action }}
+                                        </span>
+                                    </td>
+                                    <td>{{ h.status|default:"-" }}</td>
+                                    <td>{{ h.performed_by|default:"-" }}</td>
+                                    <td>{{ h.performed_at|default:"-" }}</td>
+                                    <td>{{ h.comments|default:"-"|truncatechars:50 }}</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- Sidebar -->
+        <div class="col-lg-4">
+            <!-- Status Card -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">
+                        <i class="bi bi-check-circle"></i> Status
+                    </h5>
+                </div>
+                <div class="card-body text-center">
+                    <span class="badge badge-{{ status_color }} fs-4 px-4 py-2">
+                        {{ corporate_action.status|default:"INITIAL" }}
+                    </span>
+
+                    {% if can_validate %}
+                    <hr>
+                    <p class="text-muted mb-3">You can validate or reject this corporate action</p>
+                    <form method="post" action="{% url 'reference_data:corporate_action_validate' corporate_action.ca_id %}" class="mb-2">
+                        {% csrf_token %}
+                        <input type="hidden" name="action" value="approve">
+                        <div class="mb-3">
+                            <textarea class="form-control" name="comments" rows="2" placeholder="Validation comments (optional)"></textarea>
+                        </div>
+                        <div class="d-grid gap-2">
+                            <button type="submit" class="btn btn-success">
+                                <i class="bi bi-check-circle"></i> Validate
+                            </button>
+                        </div>
+                    </form>
+                    <form method="post" action="{% url 'reference_data:corporate_action_validate' corporate_action.ca_id %}">
+                        {% csrf_token %}
+                        <input type="hidden" name="action" value="reject">
+                        <input type="hidden" name="comments" value="Rejected without comment">
+                        <button type="submit" class="btn btn-outline-danger w-100" onclick="return confirm('Are you sure you want to reject this corporate action?');">
+                            <i class="bi bi-x-circle"></i> Reject
+                        </button>
+                    </form>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Audit Info Card -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">
+                        <i class="bi bi-person-badge"></i> Audit Information
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label class="text-muted small">Created By</label>
+                        <p class="mb-0 fw-bold">{{ corporate_action.created_by|default:"-" }}</p>
+                    </div>
+                    <div class="mb-3">
+                        <label class="text-muted small">Created At</label>
+                        <p class="mb-0">{{ corporate_action.created_at|default:"-" }}</p>
+                    </div>
+                    <div class="mb-3">
+                        <label class="text-muted small">Updated By</label>
+                        <p class="mb-0 fw-bold">{{ corporate_action.updated_by|default:"-" }}</p>
+                    </div>
+                    <div class="mb-3">
+                        <label class="text-muted small">Updated At</label>
+                        <p class="mb-0">{{ corporate_action.updated_at|default:"-" }}</p>
+                    </div>
+                    {% if corporate_action.reviewed_by %}
+                    <div class="mb-3">
+                        <label class="text-muted small">Reviewed By</label>
+                        <p class="mb-0 fw-bold">{{ corporate_action.reviewed_by }}</p>
+                    </div>
+                    <div class="mb-3">
+                        <label class="text-muted small">Reviewed At</label>
+                        <p class="mb-0">{{ corporate_action.reviewed_at|default:"-" }}</p>
+                    </div>
+                    {% if corporate_action.reviewed_comments %}
+                    <div class="mb-0">
+                        <label class="text-muted small">Review Comments</label>
+                        <p class="mb-0">{{ corporate_action.reviewed_comments }}</p>
+                    </div>
+                    {% endif %}
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Quick Actions Card -->
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">
+                        <i class="bi bi-lightning"></i> Quick Actions
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="d-grid gap-2">
+                        {% if can_edit %}
+                        <a href="{% url 'reference_data:corporate_action_edit' corporate_action.ca_id %}" class="btn btn-outline-primary">
+                            <i class="bi bi-pencil"></i> Edit Corporate Action
+                        </a>
+                        {% endif %}
+                        <a href="{% url 'reference_data:corporate_action_list' %}" class="btn btn-outline-secondary">
+                            <i class="bi bi-list"></i> View All Corporate Actions
+                        </a>
+                        <a href="{% url 'reference_data:corporate_action_create' %}" class="btn btn-outline-success">
+                            <i class="bi bi-plus-circle"></i> Create New
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

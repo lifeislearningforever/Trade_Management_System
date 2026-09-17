@@ -1,0 +1,22 @@
+﻿Portfolio,Security,country,Quantity,shares_issued,market_price,market_value_fc,net_book_value_fc
+Check portfolio against gmp_cis.cis_portfolio.name,Check isin against cis_security.isin,"If null, check if exchange is null.
+If exchange is not null,
+    Check exchange against cis_security.exchange
+    country = cis_security.country where exchange = cis_security.exchange","If not null, take quantity","If not null, take shares_issued","Using isin = cis_equity_price.isin, check if cis_equity_price.main_closing_price is null for cis_equity_price.price_date = reporting_date.
+If main_closing_price is not null for cis_equity_price.price_date = reporting_date,
+    Take cis_equity_price.main_closing_price
+Else if main_closing_price is null for cis_equity_price.price_date = reporting_date,
+    cis_equity_price.main_closing_price = market_price","If null, market_value_fc = quantity * (cis_equity_price.main_closing_price where isin = cis_equity_price.isin)","if net_book_value_fc is null,
+    net_book_value_fc = cost_fc - provision_fc"
+"If fail, entry fails","If fail, check security_full_name against cis_security.security_description","If exchange is null, entry fails","If null, take cost_fc","If null, check if pct_holding and quantity are null.
+    If pct_holding and quantity are not null,
+        shares_issued = quantity / pct_holding",,,
+,"If still fail, check security_short_name against security_name",,"If cost_fc is null, entry fails","If shares_issued, pct_holding are null, entry fails",,,
+,"If still fail, 
+    Check security_full_name against gmp_cis.cis_party.party_full_name
+    If fail, check security_short_name against gmp_cis.cis_party.party_short_name
+    If still fail, create new party with all relevant fields. Then create new security with issuer as party_short_name and all other relevant fields",,,,,,
+,"If isin, security_full_name and security_short_name are null, entry fails",,,,,,
+,,,,,,,
+,,,,,,,
+,,,,,,,

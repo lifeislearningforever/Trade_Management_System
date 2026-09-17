@@ -1,0 +1,88 @@
+"""
+CisTrade - Main URL Configuration
+Professional Trade Management System - ACL-Based Authentication
+"""
+
+from django.urls import path, include
+from django.conf import settings
+from django.conf.urls.static import static
+from django.shortcuts import redirect
+
+from core.views.auth_views import LoginView, LogoutView, auto_login_tmp3rc
+from core.views.dashboard_views import dashboard_view, global_search_view
+from core.views import error_views
+
+# Custom application-level error pages (used whenever DEBUG=False, i.e.
+# SIT/UAT/PROD) so users see a branded message instead of Django's
+# default error page or a raw traceback.
+handler400 = error_views.bad_request
+handler403 = error_views.permission_denied
+handler404 = error_views.page_not_found
+handler500 = error_views.server_error
+
+# Redirect home to login page (requires proper authentication)
+def home_view(request):
+    # If user is already logged in, redirect to dashboard
+    if request.session.get('user_login'):
+        return redirect('dashboard')
+    # Otherwise, redirect to login page
+    return redirect('login')
+
+urlpatterns = [
+    # Home - redirect to dashboard or login
+    path('', home_view, name='home'),
+
+    # Authentication
+    path('login/', LoginView.as_view(), name='login'),
+    path('logout/', LogoutView.as_view(), name='logout'),
+    # Auto-login disabled in production - only available in DEBUG mode
+    # path('auto-login/', auto_login_tmp3rc, name='auto_login'),
+
+    # Dashboard
+    path('dashboard/', dashboard_view, name='dashboard'),
+
+    # Global Search
+    path('search/', global_search_view, name='global_search'),
+
+    # Core
+    path('core/', include('core.urls')),
+
+    # Reference Data
+    path('reference-data/', include('reference_data.urls')),
+
+    # Portfolio
+    path('portfolio/', include('portfolio.urls')),
+
+    # Market Data
+    path('market-data/', include('market_data.urls')),
+
+    # UDF (User Defined Fields)
+    path('udf/', include('udf.urls')),
+
+    # Security Master Data
+    path('security/', include('security.urls')),
+
+    # Trade Management
+    path('trade/', include('trade.urls')),
+
+    # Lookup Tables (Configuration)
+    path('lookup/', include('lookup.urls')),
+
+    # Hive POC - Managed Tables with ORC
+    path('hive-poc/', include('hive_poc.urls')),
+
+    # File Upload & Hive External Table Ingestion
+    path('upload/', include('upload.urls')),
+
+    # Query Builder
+    path('query-builder/', include('query_builder.urls')),
+]
+
+# Serve static files in development
+if settings.DEBUG:
+    urlpatterns += static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)
+    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+    # Auto-login only available in DEBUG mode for development/testing
+    urlpatterns += [
+        path('auto-login/', auto_login_tmp3rc, name='auto_login'),
+    ]

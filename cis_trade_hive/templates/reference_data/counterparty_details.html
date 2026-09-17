@@ -1,0 +1,272 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}{{ counterparty.counterparty_short_name }} - CisTrade{% endblock %}
+
+{% block breadcrumb %}
+    <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
+    <li class="breadcrumb-item"><a href="#">Reference Data</a></li>
+    <li class="breadcrumb-item"><a href="{% url 'reference_data:counterparty_list' %}">Counterparties</a></li>
+    <li class="breadcrumb-item active">{{ counterparty.counterparty_short_name }}</li>
+{% endblock %}
+
+{% block content %}
+<div class="counterparty-detail-container">
+    <!-- Page Header -->
+    <div class="content-header">
+        <div>
+            <h1 class="content-title">
+                <i class="bi bi-building text-primary"></i> {{ counterparty.counterparty_short_name }}
+            </h1>
+            <p class="content-subtitle">{{ counterparty.counterparty_full_name|default:"-" }}</p>
+        </div>
+        <div>
+            <a href="{% url 'reference_data:counterparty_edit' counterparty.counterparty_short_name %}" class="btn btn-warning">
+                <i class="bi bi-pencil"></i> Edit
+            </a>
+        </div>
+    </div>
+
+    <!-- Status Card -->
+    <div class="card mb-4">
+        <div class="card-body">
+            <div class="row">
+                <div class="col-md-3">
+                    <h6 class="text-muted mb-2">Status</h6>
+                    {% if counterparty.is_active %}
+                        <span class="badge badge-success fs-6">Active</span>
+                    {% else %}
+                        <span class="badge badge-danger fs-6">Inactive</span>
+                    {% endif %}
+                </div>
+                <div class="col-md-3">
+                    <h6 class="text-muted mb-2">Is Deleted</h6>
+                    {% if counterparty.is_deleted %}
+                        <i class="bi bi-check-circle-fill text-danger fs-5"></i> Yes
+                    {% else %}
+                        <i class="bi bi-x-circle-fill text-success fs-5"></i> No
+                    {% endif %}
+                </div>
+                <div class="col-md-3">
+                    <h6 class="text-muted mb-2">CIF Count</h6>
+                    <strong class="fs-5">{{ cif_count }}</strong>
+                </div>
+                <div class="col-md-3">
+                    <h6 class="text-muted mb-2">Source System</h6>
+                    <span class="badge badge-info fs-6">{{ counterparty.src_system|default:"CIS" }}</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Counterparty Details -->
+    <div class="row">
+        <div class="col-md-6">
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">Basic Information</h5>
+                </div>
+                <div class="card-body">
+                    <table class="table table-sm">
+                        <tr>
+                            <th style="width: 40%;">Short Name:</th>
+                            <td><strong>{{ counterparty.counterparty_short_name }}</strong></td>
+                        </tr>
+                        <tr>
+                            <th>Full Name:</th>
+                            <td>{{ counterparty.counterparty_full_name|default:"-" }}</td>
+                        </tr>
+                        <tr>
+                            <th>Record Type:</th>
+                            <td>{{ counterparty.record_type|default:"-" }}</td>
+                        </tr>
+                        <tr>
+                            <th>Industry:</th>
+                            <td>{{ counterparty.industry|default:"-" }}</td>
+                        </tr>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-6">
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">Address & Contact</h5>
+                </div>
+                <div class="card-body">
+                    <table class="table table-sm">
+                        <tr>
+                            <th style="width: 40%;">City:</th>
+                            <td>{{ counterparty.city|default:"-" }}</td>
+                        </tr>
+                        <tr>
+                            <th>Country:</th>
+                            <td>{{ counterparty.country|default:"-" }}</td>
+                        </tr>
+                        <tr>
+                            <th>Postal Code:</th>
+                            <td>{{ counterparty.postal_code|default:"-" }}</td>
+                        </tr>
+                        <tr>
+                            <th>Primary Contact:</th>
+                            <td>{{ counterparty.primary_contact|default:"-" }}</td>
+                        </tr>
+                        <tr>
+                            <th>Primary Number:</th>
+                            <td>{{ counterparty.primary_number|default:"-" }}</td>
+                        </tr>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Classification Flags -->
+    <div class="card mb-4">
+        <div class="card-header">
+            <h5 class="card-title mb-0">Classification Flags</h5>
+        </div>
+        <div class="card-body">
+            <div class="row">
+                <div class="col-md-3">
+                    <h6 class="text-muted mb-2">Is Bank</h6>
+                    <p>
+                        {% if counterparty.is_bank %}
+                            <i class="bi bi-check-circle-fill text-success fs-5"></i> Yes
+                        {% else %}
+                            <i class="bi bi-x-circle-fill text-secondary fs-5"></i> No
+                        {% endif %}
+                    </p>
+                </div>
+                <div class="col-md-3">
+                    <h6 class="text-muted mb-2">Is Broker</h6>
+                    <p>
+                        {% if counterparty.is_broker %}
+                            <i class="bi bi-check-circle-fill text-success fs-5"></i> Yes
+                        {% else %}
+                            <i class="bi bi-x-circle-fill text-secondary fs-5"></i> No
+                        {% endif %}
+                    </p>
+                </div>
+                <div class="col-md-3">
+                    <h6 class="text-muted mb-2">Is Custodian</h6>
+                    <p>
+                        {% if counterparty.is_custodian %}
+                            <i class="bi bi-check-circle-fill text-success fs-5"></i> Yes
+                        {% else %}
+                            <i class="bi bi-x-circle-fill text-secondary fs-5"></i> No
+                        {% endif %}
+                    </p>
+                </div>
+                <div class="col-md-3">
+                    <h6 class="text-muted mb-2">Is Issuer</h6>
+                    <p>
+                        {% if counterparty.is_issuer %}
+                            <i class="bi bi-check-circle-fill text-success fs-5"></i> Yes
+                        {% else %}
+                            <i class="bi bi-x-circle-fill text-secondary fs-5"></i> No
+                        {% endif %}
+                    </p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- CIFs Section -->
+    <div class="card mb-4">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <h5 class="card-title mb-0">
+                <i class="bi bi-file-earmark-text"></i> Customer Identification Numbers (CIFs)
+            </h5>
+            <span class="badge badge-primary">{{ cif_count }} CIF(s)</span>
+        </div>
+        <div class="card-body">
+            {% if cifs %}
+                <div class="table-responsive">
+                    <table class="table table-hover">
+                        <thead>
+                            <tr>
+                                <th>Country</th>
+                                <th>Source</th>
+                                <th>ISIN</th>
+                                <th>Description</th>
+                                <th>Status</th>
+                                <th>Created At</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for cif in cifs %}
+                            <tr>
+                                <td><strong>{{ cif.country|default:"-" }}</strong></td>
+                                <td>
+                                    {% if cif.src_system|upper == 'CIS' %}
+                                        <span class="badge badge-success">CIS</span>
+                                    {% else %}
+                                        <span class="badge badge-secondary">{{ cif.src_system|upper|default:"GMP" }}</span>
+                                    {% endif %}
+                                </td>
+                                <td>{{ cif.isin|default:"-" }}</td>
+                                <td>{{ cif.description|default:"-" }}</td>
+                                <td>
+                                    {% if cif.is_active %}
+                                        <span class="badge badge-success">Active</span>
+                                    {% else %}
+                                        <span class="badge badge-secondary">Inactive</span>
+                                    {% endif %}
+                                    {% if cif.is_deleted %}
+                                        <span class="badge badge-danger">Deleted</span>
+                                    {% endif %}
+                                </td>
+                                <td>{{ cif.created_at|default:"-" }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            {% else %}
+                <div class="alert alert-info">
+                    <i class="bi bi-info-circle"></i> No CIFs found for this counterparty.
+                </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Audit Information -->
+    <div class="card mb-4">
+        <div class="card-header">
+            <h5 class="card-title mb-0">Audit Information</h5>
+        </div>
+        <div class="card-body">
+            <div class="row">
+                <div class="col-md-3">
+                    <h6 class="text-muted mb-2">Created By</h6>
+                    <p><i class="bi bi-person-circle"></i> {{ counterparty.created_by|default:"-" }}</p>
+                </div>
+                <div class="col-md-3">
+                    <h6 class="text-muted mb-2">Created At</h6>
+                    <p><i class="bi bi-clock-history"></i> {{ counterparty.created_at|default:"-" }}</p>
+                </div>
+                <div class="col-md-3">
+                    <h6 class="text-muted mb-2">Updated By</h6>
+                    <p><i class="bi bi-person-circle"></i> {{ counterparty.updated_by|default:"-" }}</p>
+                </div>
+                <div class="col-md-3">
+                    <h6 class="text-muted mb-2">Updated At</h6>
+                    <p><i class="bi bi-clock-history"></i> {{ counterparty.updated_at|default:"-" }}</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Action Buttons -->
+    <div class="d-flex gap-2">
+        <a href="{% url 'reference_data:counterparty_list' %}" class="btn btn-outline-secondary">
+            <i class="bi bi-arrow-left"></i> Back to List
+        </a>
+        <a href="{% url 'reference_data:counterparty_edit' counterparty.counterparty_short_name %}" class="btn btn-warning">
+            <i class="bi bi-pencil"></i> Edit Counterparty
+        </a>
+    </div>
+</div>
+{% endblock %}

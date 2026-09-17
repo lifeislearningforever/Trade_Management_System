@@ -1,0 +1,64 @@
+{% extends 'base.html' %}
+
+{% block title %}New Permission - RBAC Admin{% endblock %}
+
+{% block breadcrumb %}
+    <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
+    <li class="breadcrumb-item"><a href="{% url 'core:rbac_dashboard' %}">RBAC Admin</a></li>
+    <li class="breadcrumb-item"><a href="{% url 'core:rbac_permission_list' %}">Permissions</a></li>
+    <li class="breadcrumb-item active">New</li>
+{% endblock %}
+
+{% block content %}
+<div class="content-header">
+    <h1 class="content-title"><i class="bi bi-key text-warning"></i> New Permission</h1>
+</div>
+
+{% if messages %}
+<div class="mb-3">
+    {% for msg in messages %}
+    <div class="alert alert-{% if msg.tags == 'error' %}danger{% else %}{{ msg.tags }}{% endif %} alert-dismissible fade show py-2">
+        {{ msg }} <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
+<div class="card" style="max-width: 600px;">
+    <div class="card-body">
+        <form method="post">
+            {% csrf_token %}
+
+            <div class="mb-3">
+                <label class="form-label">Permission Name <span class="text-danger">*</span></label>
+                <input type="text" name="permission_name" class="form-control"
+                       value="{{ permission.permission_name|default:'' }}"
+                       placeholder="e.g. trade-create" required>
+                <div class="form-text">Use kebab-case. E.g. <code>trade-create</code>, <code>portfolio-list</code>.</div>
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label">Entity</label>
+                <select name="entity" class="form-select">
+                    <option value="UOBS">UOBS</option>
+                    <option value="UOBM">UOBM</option>
+                    <option value="UOBT">UOBT</option>
+                </select>
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label">Description</label>
+                <textarea name="description" class="form-control" rows="2"
+                          placeholder="What does this permission control?">{{ permission.description|default:'' }}</textarea>
+            </div>
+
+            <div class="d-flex gap-2">
+                <button type="submit" class="btn btn-warning">
+                    <i class="bi bi-check-lg"></i> Create Permission
+                </button>
+                <a href="{% url 'core:rbac_permission_list' %}" class="btn btn-outline-secondary">Cancel</a>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
