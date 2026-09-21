@@ -31,7 +31,9 @@ CIS Trade Hive (Space Home)
 ├── 08 — Environments & Configuration         ← Developer / Support
 ├── 09 — Data Migration & Backup/Restore      ← Developer / Support
 ├── 10 — Glossary                             ← Everyone
-└── 11 — CDP Cluster Access Flow (Ranger)     ← GIPS / Infrastructure / Security
+├── 11 — CDP Cluster Access Flow (Ranger)     ← GIPS / Infrastructure / Security
+├── 12 — SRE/Support Handover                 ← SRE / Support (day-2 operations)
+└── 13 — Architecture Visual Summary          ← Everyone (diagram-first overview)
 ```
 
 ---
@@ -59,3 +61,5 @@ CIS Trade Hive (Space Home)
 | `09_migration.md` | Data Migration & Backup/Restore | Dev / Support |
 | `10_glossary.md` | Glossary | Everyone |
 | `11_cdp_ranger_access_flow.md` | CDP Cluster Access Flow (Ranger) | GIPS / Infra / Security |
+| `12_sre_support_handover.md` | SRE/Support Handover | SRE / Support |
+| `13_architecture_visual_summary.md` | Architecture Visual Summary | Everyone |
