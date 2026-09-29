@@ -1,0 +1,99 @@
+{% extends 'hive_poc/base.html' %}
+{% block title %}Trades{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2>Trades</h2>
+    <div>
+        <a href="{% url 'hive_poc:trade_deleted' %}" class="btn btn-outline-secondary">View Deleted</a>
+        <a href="{% url 'hive_poc:trade_create' %}" class="btn btn-success">+ Create Trade</a>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        Trade List (Hive Managed Table: trade_hive)
+    </div>
+    <div class="card-body">
+        {% if trades %}
+        <div class="table-responsive">
+            <table class="table table-striped table-hover">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Portfolio</th>
+                        <th>Security</th>
+                        <th>Type</th>
+                        <th>Qty</th>
+                        <th>Price</th>
+                        <th>Amount</th>
+                        <th>Trade Date</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for trade in trades %}
+                    <tr {% if trade.deleted_at %}class="deleted-row"{% endif %}>
+                        <td><code>{{ trade.trade_id }}</code></td>
+                        <td>{{ trade.portfolio_id }}</td>
+                        <td>
+                            <span title="{{ trade.security_id }}">{{ trade.security_name|truncatechars:20 }}</span>
+                        </td>
+                        <td>
+                            <span class="badge {% if trade.trade_type == 'BUY' %}bg-success{% else %}bg-danger{% endif %}">
+                                {{ trade.trade_type }}
+                            </span>
+                        </td>
+                        <td class="text-end">{{ trade.quantity|floatformat:0 }}</td>
+                        <td class="text-end">{{ trade.price|floatformat:2 }}</td>
+                        <td class="text-end">{{ trade.currency }} {{ trade.trade_amount|floatformat:2 }}</td>
+                        <td>{{ trade.trade_date }}</td>
+                        <td>
+                            <span class="badge {% if trade.status == 'SETTLED' %}bg-success{% elif trade.status == 'CANCELLED' %}bg-danger{% elif trade.status == 'EXECUTED' %}bg-info{% else %}bg-warning text-dark{% endif %}">
+                                {{ trade.status }}
+                            </span>
+                        </td>
+                        <td>
+                            {% if not trade.deleted_at %}
+                                {% if trade.status != 'SETTLED' and trade.status != 'CANCELLED' %}
+                                <a href="{% url 'hive_poc:trade_edit' trade.trade_id %}" class="btn btn-sm btn-outline-primary">Edit</a>
+                                {% endif %}
+
+                                {% if trade.status == 'PENDING' %}
+                                <form method="post" action="{% url 'hive_poc:trade_update_status' trade.trade_id %}" style="display:inline;">
+                                    {% csrf_token %}
+                                    <input type="hidden" name="status" value="EXECUTED">
+                                    <button type="submit" class="btn btn-sm btn-outline-info">Execute</button>
+                                </form>
+                                {% elif trade.status == 'EXECUTED' %}
+                                <form method="post" action="{% url 'hive_poc:trade_update_status' trade.trade_id %}" style="display:inline;">
+                                    {% csrf_token %}
+                                    <input type="hidden" name="status" value="SETTLED">
+                                    <button type="submit" class="btn btn-sm btn-outline-success">Settle</button>
+                                </form>
+                                {% endif %}
+
+                                {% if trade.status != 'SETTLED' %}
+                                <form method="post" action="{% url 'hive_poc:trade_delete' trade.trade_id %}" style="display:inline;">
+                                    {% csrf_token %}
+                                    <button type="submit" class="btn btn-sm btn-outline-danger" onclick="return confirm('Are you sure?');">Delete</button>
+                                </form>
+                                {% endif %}
+                            {% else %}
+                            <span class="badge bg-danger">Deleted</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="alert alert-info">
+            No trades found. <a href="{% url 'hive_poc:trade_create' %}">Create one</a>.
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

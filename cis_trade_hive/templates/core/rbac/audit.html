@@ -1,0 +1,79 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}RBAC Audit Log - CisTrade{% endblock %}
+
+{% block breadcrumb %}
+    <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
+    <li class="breadcrumb-item"><a href="{% url 'core:rbac_dashboard' %}">RBAC Admin</a></li>
+    <li class="breadcrumb-item active">Audit Log</li>
+{% endblock %}
+
+{% block content %}
+<div class="content-header d-flex justify-content-between align-items-start">
+    <div>
+        <h1 class="content-title"><i class="bi bi-journal-check text-secondary"></i> RBAC Audit Log</h1>
+        <p class="content-subtitle">Last {{ limit }} RBAC-related entries</p>
+    </div>
+    <div class="d-flex gap-2">
+        <a href="?limit=100" class="btn btn-outline-secondary btn-sm {% if limit == 100 %}active{% endif %}">100</a>
+        <a href="?limit=200" class="btn btn-outline-secondary btn-sm {% if limit == 200 %}active{% endif %}">200</a>
+        <a href="?limit=500" class="btn btn-outline-secondary btn-sm {% if limit == 500 %}active{% endif %}">500</a>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-body p-0">
+        {% if entries %}
+        <div class="table-responsive" style="max-height: 700px; overflow-y: auto;">
+            <table class="table table-hover table-sm mb-0">
+                <thead class="table-light" style="position: sticky; top: 0; z-index: 10;">
+                    <tr>
+                        <th style="min-width: 150px;">Timestamp</th>
+                        <th>User</th>
+                        <th>Action</th>
+                        <th>Entity Type</th>
+                        <th>Entity</th>
+                        <th style="min-width: 200px;">Description</th>
+                        <th>IP</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for e in entries %}
+                    <tr>
+                        <td class="text-muted small">{{ e.audit_timestamp|default:"-" }}</td>
+                        <td><strong>{{ e.username|default:"-" }}</strong></td>
+                        <td>
+                            {% if e.action_type == 'CREATE' %}
+                                <span class="badge bg-success">CREATE</span>
+                            {% elif e.action_type == 'UPDATE' %}
+                                <span class="badge bg-primary">UPDATE</span>
+                            {% elif e.action_type == 'DEACTIVATE' %}
+                                <span class="badge bg-warning text-dark">DEACTIVATE</span>
+                            {% elif e.action_type == 'DELETE' %}
+                                <span class="badge bg-danger">DELETE</span>
+                            {% else %}
+                                <span class="badge bg-secondary">{{ e.action_type|default:"-" }}</span>
+                            {% endif %}
+                        </td>
+                        <td><code class="small">{{ e.entity_type|default:"-" }}</code></td>
+                        <td class="small">{{ e.entity_name|default:e.entity_id|default:"-" }}</td>
+                        <td class="small text-muted" style="max-width:200px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;"
+                            title="{{ e.action_description }}">
+                            {{ e.action_description|default:"-" }}
+                        </td>
+                        <td class="text-muted small">{{ e.ip_address|default:"-" }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="text-center py-5 text-muted">
+            <i class="bi bi-journal" style="font-size: 3rem; opacity: 0.3;"></i>
+            <p class="mt-3">No RBAC audit entries found.</p>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

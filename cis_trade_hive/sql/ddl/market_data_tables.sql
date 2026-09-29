@@ -1,0 +1,183 @@
+-- =====================================================
+-- Market Data Hive Tables DDL
+-- Database: cis
+-- Table: fx_rates
+-- =====================================================
+
+-- Create FX Rates Table
+CREATE TABLE IF NOT EXISTS fx_rates (
+    currency_pair STRING COMMENT 'Currency pair (e.g., USD/EUR, GBP/USD)',
+    base_currency STRING COMMENT 'Base currency code (ISO 4217)',
+    quote_currency STRING COMMENT 'Quote currency code (ISO 4217)',
+    rate DECIMAL(20,10) COMMENT 'Exchange rate',
+    bid_rate DECIMAL(20,10) COMMENT 'Bid rate (buy price)',
+    ask_rate DECIMAL(20,10) COMMENT 'Ask rate (sell price)',
+    mid_rate DECIMAL(20,10) COMMENT 'Mid rate ((bid + ask) / 2)',
+    rate_date DATE COMMENT 'Date of the rate',
+    rate_time TIMESTAMP COMMENT 'Timestamp of the rate',
+    source STRING COMMENT 'Source of the rate (BLOOMBERG, REUTERS, MANUAL, API, HIVE)',
+    is_active BOOLEAN COMMENT 'Whether this rate is currently active',
+    created_at TIMESTAMP COMMENT 'Record creation timestamp',
+    updated_at TIMESTAMP COMMENT 'Record update timestamp'
+)
+COMMENT 'Foreign Exchange Rates Table'
+STORED AS ORC
+TBLPROPERTIES (
+    'orc.compress'='SNAPPY'
+);
+
+-- =====================================================
+-- Sample Data Insert Statements
+-- =====================================================
+
+-- Insert realistic FX rate data
+
+-- USD/EUR rates
+INSERT INTO fx_rates VALUES
+('USD/EUR', 'USD', 'EUR', 0.9234567890, 0.9234000000, 0.9235000000, 0.9234500000,
+ '2025-12-26', '2025-12-26 10:00:00', 'BLOOMBERG', true,
+ '2025-12-26 10:00:00', '2025-12-26 10:00:00'),
+('USD/EUR', 'USD', 'EUR', 0.9231234567, 0.9230800000, 0.9231600000, 0.9231200000,
+ '2025-12-26', '2025-12-26 09:00:00', 'REUTERS', true,
+ '2025-12-26 09:00:00', '2025-12-26 09:00:00'),
+('USD/EUR', 'USD', 'EUR', 0.9228901234, 0.9228500000, 0.9229300000, 0.9228900000,
+ '2025-12-25', '2025-12-25 15:30:00', 'BLOOMBERG', true,
+ '2025-12-25 15:30:00', '2025-12-25 15:30:00');
+
+-- GBP/USD rates
+INSERT INTO fx_rates VALUES
+('GBP/USD', 'GBP', 'USD', 1.2567890123, 1.2567000000, 1.2568500000, 1.2567750000,
+ '2025-12-26', '2025-12-26 10:00:00', 'BLOOMBERG', true,
+ '2025-12-26 10:00:00', '2025-12-26 10:00:00'),
+('GBP/USD', 'GBP', 'USD', 1.2564567890, 1.2564000000, 1.2565200000, 1.2564600000,
+ '2025-12-26', '2025-12-26 09:00:00', 'REUTERS', true,
+ '2025-12-26 09:00:00', '2025-12-26 09:00:00'),
+('GBP/USD', 'GBP', 'USD', 1.2561234567, 1.2560800000, 1.2561700000, 1.2561250000,
+ '2025-12-25', '2025-12-25 15:30:00', 'BLOOMBERG', true,
+ '2025-12-25 15:30:00', '2025-12-25 15:30:00');
+
+-- USD/JPY rates
+INSERT INTO fx_rates VALUES
+('USD/JPY', 'USD', 'JPY', 151.4567890123, 151.4500000000, 151.4600000000, 151.4550000000,
+ '2025-12-26', '2025-12-26 10:00:00', 'BLOOMBERG', true,
+ '2025-12-26 10:00:00', '2025-12-26 10:00:00'),
+('USD/JPY', 'USD', 'JPY', 151.3234567890, 151.3200000000, 151.3300000000, 151.3250000000,
+ '2025-12-26', '2025-12-26 09:00:00', 'REUTERS', true,
+ '2025-12-26 09:00:00', '2025-12-26 09:00:00'),
+('USD/JPY', 'USD', 'JPY', 151.1901234567, 151.1850000000, 151.1950000000, 151.1900000000,
+ '2025-12-25', '2025-12-25 15:30:00', 'BLOOMBERG', true,
+ '2025-12-25 15:30:00', '2025-12-25 15:30:00');
+
+-- EUR/GBP rates
+INSERT INTO fx_rates VALUES
+('EUR/GBP', 'EUR', 'GBP', 0.8342567890, 0.8342000000, 0.8343000000, 0.8342500000,
+ '2025-12-26', '2025-12-26 10:00:00', 'BLOOMBERG', true,
+ '2025-12-26 10:00:00', '2025-12-26 10:00:00'),
+('EUR/GBP', 'EUR', 'GBP', 0.8339234567, 0.8338800000, 0.8339600000, 0.8339200000,
+ '2025-12-26', '2025-12-26 09:00:00', 'REUTERS', true,
+ '2025-12-26 09:00:00', '2025-12-26 09:00:00'),
+('EUR/GBP', 'EUR', 'GBP', 0.8335901234, 0.8335500000, 0.8336300000, 0.8335900000,
+ '2025-12-25', '2025-12-25 15:30:00', 'BLOOMBERG', true,
+ '2025-12-25 15:30:00', '2025-12-25 15:30:00');
+
+-- USD/CHF rates
+INSERT INTO fx_rates VALUES
+('USD/CHF', 'USD', 'CHF', 0.8923456789, 0.8923000000, 0.8924000000, 0.8923500000,
+ '2025-12-26', '2025-12-26 10:00:00', 'BLOOMBERG', true,
+ '2025-12-26 10:00:00', '2025-12-26 10:00:00'),
+('USD/CHF', 'USD', 'CHF', 0.8920123456, 0.8919700000, 0.8920500000, 0.8920100000,
+ '2025-12-26', '2025-12-26 09:00:00', 'REUTERS', true,
+ '2025-12-26 09:00:00', '2025-12-26 09:00:00');
+
+-- AUD/USD rates
+INSERT INTO fx_rates VALUES
+('AUD/USD', 'AUD', 'USD', 0.6234567890, 0.6234000000, 0.6235000000, 0.6234500000,
+ '2025-12-26', '2025-12-26 10:00:00', 'BLOOMBERG', true,
+ '2025-12-26 10:00:00', '2025-12-26 10:00:00'),
+('AUD/USD', 'AUD', 'USD', 0.6231234567, 0.6230800000, 0.6231600000, 0.6231200000,
+ '2025-12-26', '2025-12-26 09:00:00', 'REUTERS', true,
+ '2025-12-26 09:00:00', '2025-12-26 09:00:00');
+
+-- USD/CAD rates
+INSERT INTO fx_rates VALUES
+('USD/CAD', 'USD', 'CAD', 1.4567890123, 1.4567000000, 1.4568500000, 1.4567750000,
+ '2025-12-26', '2025-12-26 10:00:00', 'BLOOMBERG', true,
+ '2025-12-26 10:00:00', '2025-12-26 10:00:00'),
+('USD/CAD', 'USD', 'CAD', 1.4564567890, 1.4564000000, 1.4565200000, 1.4564600000,
+ '2025-12-26', '2025-12-26 09:00:00', 'REUTERS', true,
+ '2025-12-26 09:00:00', '2025-12-26 09:00:00');
+
+-- NZD/USD rates
+INSERT INTO fx_rates VALUES
+('NZD/USD', 'NZD', 'USD', 0.5634567890, 0.5634000000, 0.5635000000, 0.5634500000,
+ '2025-12-26', '2025-12-26 10:00:00', 'BLOOMBERG', true,
+ '2025-12-26 10:00:00', '2025-12-26 10:00:00'),
+('NZD/USD', 'NZD', 'USD', 0.5631234567, 0.5630800000, 0.5631600000, 0.5631200000,
+ '2025-12-26', '2025-12-26 09:00:00', 'REUTERS', true,
+ '2025-12-26 09:00:00', '2025-12-26 09:00:00');
+
+-- EUR/JPY rates
+INSERT INTO fx_rates VALUES
+('EUR/JPY', 'EUR', 'JPY', 163.9567890123, 163.9500000000, 163.9600000000, 163.9550000000,
+ '2025-12-26', '2025-12-26 10:00:00', 'BLOOMBERG', true,
+ '2025-12-26 10:00:00', '2025-12-26 10:00:00'),
+('EUR/JPY', 'EUR', 'JPY', 163.8234567890, 163.8200000000, 163.8300000000, 163.8250000000,
+ '2025-12-26', '2025-12-26 09:00:00', 'REUTERS', true,
+ '2025-12-26 09:00:00', '2025-12-26 09:00:00');
+
+-- GBP/JPY rates
+INSERT INTO fx_rates VALUES
+('GBP/JPY', 'GBP', 'JPY', 190.3456789012, 190.3400000000, 190.3500000000, 190.3450000000,
+ '2025-12-26', '2025-12-26 10:00:00', 'BLOOMBERG', true,
+ '2025-12-26 10:00:00', '2025-12-26 10:00:00'),
+('GBP/JPY', 'GBP', 'JPY', 190.2123456789, 190.2100000000, 190.2200000000, 190.2150000000,
+ '2025-12-26', '2025-12-26 09:00:00', 'REUTERS', true,
+ '2025-12-26 09:00:00', '2025-12-26 09:00:00');
+
+-- Add some historical data (past 30 days) for USD/EUR
+INSERT INTO fx_rates VALUES
+('USD/EUR', 'USD', 'EUR', 0.9225678901, 0.9225200000, 0.9226000000, 0.9225600000,
+ '2025-12-24', '2025-12-24 14:00:00', 'BLOOMBERG', true,
+ '2025-12-24 14:00:00', '2025-12-24 14:00:00'),
+('USD/EUR', 'USD', 'EUR', 0.9222345678, 0.9221900000, 0.9222700000, 0.9222300000,
+ '2025-12-23', '2025-12-23 13:00:00', 'BLOOMBERG', true,
+ '2025-12-23 13:00:00', '2025-12-23 13:00:00'),
+('USD/EUR', 'USD', 'EUR', 0.9219012345, 0.9218600000, 0.9219400000, 0.9219000000,
+ '2025-12-22', '2025-12-22 12:00:00', 'BLOOMBERG', true,
+ '2025-12-22 12:00:00', '2025-12-22 12:00:00'),
+('USD/EUR', 'USD', 'EUR', 0.9215679012, 0.9215300000, 0.9216100000, 0.9215700000,
+ '2025-12-21', '2025-12-21 11:00:00', 'BLOOMBERG', true,
+ '2025-12-21 11:00:00', '2025-12-21 11:00:00'),
+('USD/EUR', 'USD', 'EUR', 0.9212345679, 0.9211900000, 0.9212700000, 0.9212300000,
+ '2025-12-20', '2025-12-20 10:00:00', 'BLOOMBERG', true,
+ '2025-12-20 10:00:00', '2025-12-20 10:00:00');
+
+-- Add some manual entries
+INSERT INTO fx_rates VALUES
+('USD/SGD', 'USD', 'SGD', 1.3456789012, 1.3456000000, 1.3457500000, 1.3456750000,
+ '2025-12-26', '2025-12-26 10:00:00', 'MANUAL', true,
+ '2025-12-26 10:00:00', '2025-12-26 10:00:00'),
+('EUR/USD', 'EUR', 'USD', 1.0829012345, 1.0828500000, 1.0829500000, 1.0829000000,
+ '2025-12-26', '2025-12-26 10:00:00', 'API', true,
+ '2025-12-26 10:00:00', '2025-12-26 10:00:00');
+
+-- =====================================================
+-- Verification Queries
+-- =====================================================
+
+-- Count total records
+-- SELECT COUNT(*) as total_records FROM fx_rates;
+
+-- Show latest rates for each currency pair
+-- SELECT currency_pair, rate, rate_date, rate_time, source
+-- FROM fx_rates
+-- ORDER BY rate_date DESC, rate_time DESC;
+
+-- Show unique currency pairs
+-- SELECT DISTINCT currency_pair FROM fx_rates ORDER BY currency_pair;
+
+-- Show data source breakdown
+-- SELECT source, COUNT(*) as count FROM fx_rates GROUP BY source;
+
+-- Show rates for a specific pair
+-- SELECT * FROM fx_rates WHERE currency_pair = 'USD/EUR' ORDER BY rate_date DESC, rate_time DESC;

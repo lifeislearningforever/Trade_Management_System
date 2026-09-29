@@ -1,0 +1,52 @@
+{% extends 'hive_poc/base.html' %}
+{% block title %}Deleted Portfolios{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2>Deleted Portfolios</h2>
+    <a href="{% url 'hive_poc:portfolio_list' %}" class="btn btn-outline-primary">&larr; Back to Active</a>
+</div>
+
+<div class="card">
+    <div class="card-header bg-danger text-white">
+        Soft-Deleted Portfolios (deleted_at IS NOT NULL)
+    </div>
+    <div class="card-body">
+        {% if portfolios %}
+        <table class="table table-striped">
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Code</th>
+                    <th>Name</th>
+                    <th>Type</th>
+                    <th>Deleted At</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for portfolio in portfolios %}
+                <tr class="table-danger">
+                    <td><code>{{ portfolio.portfolio_id }}</code></td>
+                    <td><strong>{{ portfolio.portfolio_code }}</strong></td>
+                    <td>{{ portfolio.portfolio_name }}</td>
+                    <td>{{ portfolio.portfolio_type }}</td>
+                    <td>{{ portfolio.deleted_at }}</td>
+                    <td>
+                        <form method="post" action="{% url 'hive_poc:portfolio_restore' portfolio.portfolio_id %}" style="display:inline;">
+                            {% csrf_token %}
+                            <button type="submit" class="btn btn-sm btn-success">Restore</button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div class="alert alert-success">
+            No deleted portfolios. All portfolios are active.
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

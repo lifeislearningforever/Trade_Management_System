@@ -1,0 +1,739 @@
+"""
+Django Management Command: Create SOD Snapshot
+
+Creates Start-of-Day (SOD) position rows in cis_position by:
+  1. Copying the previous business day's EOD rows
+  2. Applying any settlement queue entries with settle_date == today BEFORE writing SOD
+     (so the SOD already reflects those settled trades, not a raw EOD copy followed
+     by separate INT positions created later)
+  3. Writing the merged result as position_type='SOD'
+
+Queue entries processed here are marked COMPLETED so the async settlement
+worker skips them.
+
+Date logic (from gmp_cis_sta_dly_alldatesinfo):
+  - src_system='gmp', sub_system='cis', data_frq='dly', record_type='D'
+  - reporting_date    → find EOD rows with this position_date  (e.g. 20260226)
+  - contextual_today  → SOD rows get this as position_date     (e.g. 20260302)
+
+Dates in the reference table are YYYYMMDD strings; converted to YYYY-MM-DD
+for cis_position.
+
+Usage:
+    # Normal SOD — dates inferred from alldatesinfo
+    python manage.py create_sod_snapshot
+    python manage.py create_sod_snapshot --dry-run
+    python manage.py create_sod_snapshot --portfolio UOB-SG-TRADING
+    python manage.py create_sod_snapshot --source CIS
+    python manage.py create_sod_snapshot --security AAPL_US
+
+    # Override dates manually
+    python manage.py create_sod_snapshot --eod-date 2026-03-02 --sod-date 2026-03-03
+    python manage.py create_sod_snapshot --eod-date 2026-03-02 --sod-date 2026-03-03 --source GMP
+
+    # Fill-gaps mode — keep existing SOD rows, only create missing ones from EOD
+    # Use when SOD run was partially completed and you want to top-up without
+    # replacing the SOD rows that were already written correctly.
+    python manage.py create_sod_snapshot --eod-date 2026-03-02 --sod-date 2026-03-03 --fill-gaps
+    python manage.py create_sod_snapshot --eod-date 2026-03-02 --sod-date 2026-03-03 --source CIS --fill-gaps
+    python manage.py create_sod_snapshot --eod-date 2026-03-02 --sod-date 2026-03-03 --fill-gaps --dry-run
+"""
+
+import logging
+from decimal import Decimal
+from datetime import datetime
+
+from django.core.management.base import BaseCommand, CommandError
+
+from core.repositories.impala_connection import impala_manager
+from django.conf import settings
+
+logger = logging.getLogger(__name__)
+
+DATABASE = settings.IMPALA_CONFIG['DATABASE']
+ALL_SOURCES = ['CIS', 'GMP', 'AMS_STREET', 'USER_UPLOAD']
+
+
+class Command(BaseCommand):
+    help = 'Create SOD snapshot: copy previous EOD rows (+ apply today\'s settlements) as SOD'
+
+    def add_arguments(self, parser):
+        parser.add_argument('--dry-run', action='store_true',
+                            help='Show what would be written without making changes')
+        parser.add_argument('--portfolio', type=str,
+                            help='Limit to a single portfolio (optional)')
+        parser.add_argument('--security', type=str,
+                            help='Limit to a single security_label (optional)')
+        parser.add_argument(
+            '--source', type=str, choices=ALL_SOURCES,
+            help='Limit to one source system: CIS, GMP, AMS_STREET, USER_UPLOAD (default: all)'
+        )
+        parser.add_argument(
+            '--sod-date', type=str, default=None,
+            help='Override SOD position_date (YYYY-MM-DD). Default: alldatesinfo.contextual_today'
+        )
+        parser.add_argument(
+            '--eod-date', type=str, default=None,
+            help='Override source EOD date to copy from (YYYY-MM-DD). Default: alldatesinfo.reporting_date'
+        )
+        parser.add_argument(
+            '--fill-gaps', action='store_true', default=False,
+            dest='fill_gaps',
+            help='Only create SOD rows for positions that have NO existing SOD row for sod_date. '
+                 'Keeps existing SOD rows untouched; only fills missing ones from EOD.'
+        )
+
+    def handle(self, *args, **options):
+        dry_run          = options.get('dry_run', False)
+        portfolio_filter = options.get('portfolio')
+        security_filter  = options.get('security')
+        source_filter    = options.get('source')
+        fill_gaps        = options.get('fill_gaps', False)
+
+        self.stdout.write(self.style.MIGRATE_HEADING('=' * 80))
+        self.stdout.write(self.style.MIGRATE_HEADING('SOD Snapshot — cis_position'))
+        self.stdout.write(self.style.MIGRATE_HEADING('=' * 80))
+        if dry_run:
+            self.stdout.write(self.style.WARNING('DRY RUN — no changes will be written'))
+        self.stdout.write('')
+
+        # ── 1. Get business dates (alldatesinfo or manual override) ─────────
+        today_yyyymmdd, reporting_yyyymmdd = self._get_business_dates()
+
+        if options.get('sod_date') or options.get('eod_date'):
+            # Manual override — at least one date was supplied
+            sod_date  = options['sod_date'] or self._to_iso(today_yyyymmdd)
+            eod_date  = options['eod_date'] or self._to_iso(reporting_yyyymmdd)
+            proc_date = sod_date.replace('-', '')
+            date_source = 'manual override'
+        else:
+            if not today_yyyymmdd or not reporting_yyyymmdd:
+                raise CommandError(
+                    'Could not read business dates from gmp_cis_sta_dly_alldatesinfo. '
+                    'Use --sod-date and --eod-date to override.'
+                )
+            sod_date  = self._to_iso(today_yyyymmdd)       # SOD position_date  e.g. 2026-03-02
+            eod_date  = self._to_iso(reporting_yyyymmdd)   # source EOD date    e.g. 2026-02-26
+            proc_date = today_yyyymmdd
+            date_source = 'alldatesinfo'
+
+        self.stdout.write(
+            f"Business date (contextual_today) : {today_yyyymmdd}  →  SOD position_date = {sod_date}  (from {date_source})"
+        )
+        self.stdout.write(
+            f"Reporting date (reporting_date)   : {reporting_yyyymmdd}  →  source EOD date   = {eod_date}  (from {date_source})"
+        )
+        self.stdout.write('')
+
+        if fill_gaps:
+            self.stdout.write(self.style.WARNING(
+                'Fill-gaps  : ON — only positions with no existing SOD row for '
+                f'{sod_date} will be created'
+            ))
+
+        # ── 2. Fetch EOD rows for reporting_date ─────────────────────────────
+        sources   = [source_filter] if source_filter else ALL_SOURCES
+        eod_rows  = self._get_eod_rows(eod_date, sources, portfolio_filter,
+                                        security_filter=security_filter,
+                                        fill_gaps=fill_gaps, sod_date=sod_date)
+
+        if not eod_rows:
+            self.stdout.write(self.style.WARNING(
+                f'No EOD rows found for position_date={eod_date} — nothing to snapshot'
+            ))
+            return
+
+        self.stdout.write(f"Found {len(eod_rows)} EOD row(s) to copy as SOD")
+
+        # ── 3. Apply today's pending settlements through the real AVP engine ─
+        #
+        # Fetch cis_settlement_queue entries where settle_date == sod_date and
+        # status = PENDING.  These are T+1/T+2 trades whose SETTLED position
+        # was deferred.  Each is applied via position_service.calculate_position()
+        # directly — the same engine trade/CA/cashflow already go through —
+        # instead of a hand-rolled reimplementation of the AVP formulas. This
+        # writes cis_trade_position (the ledger) and auto-syncs cis_position
+        # in one call, tagged position_type='SOD' so it lands in today's SOD
+        # partition exactly like a plain EOD-copy row would.
+        #
+        # Positions touched this way are deliberately excluded from the plain
+        # EOD-copy batch below (_batch_insert_sod) — the engine already wrote
+        # their SOD row via cis_trade_position's own position_id scheme, and
+        # writing it a second time via _batch_insert_sod's separate scheme
+        # would create a duplicate row for the same natural key.
+        #
+        # After applying, each queue entry is marked COMPLETED so the async
+        # worker does not double-process it.
+
+        pending_settlements = self._get_pending_settlements(sod_date)
+        self.stdout.write(
+            f"Found {len(pending_settlements)} pending settlement(s) "
+            f"with settle_date = {sod_date}"
+        )
+
+        # Index EOD rows by (portfolio, security_label, position_basis) for O(1) lookup
+        eod_index: dict = {}
+        for row in eod_rows:
+            key = (
+                row.get('portfolio', ''),
+                row.get('security_label', ''),
+                row.get('position_basis', 'SETTLED'),
+            )
+            eod_index[key] = row
+
+        settled_queue_ids = []
+        failed_queue_ids  = []
+        affected_keys: set = set()  # (portfolio, security, basis) written by the engine below
+
+        if dry_run:
+            self.stdout.write(self.style.WARNING(
+                'DRY RUN — pending settlements will not be applied; '
+                'SOD preview below is a plain EOD copy only'
+            ))
+        else:
+            from trade.services.position_service import position_service
+
+            # Delete any existing SOD rows for sod_date BEFORE the engine below
+            # writes — this is step "5" from the original flow, moved earlier.
+            # It must run first: the engine's cis_position sync (via
+            # position_service._sync_to_cis_position) happens inline with each
+            # calculate_position() call below, so a delete running afterwards
+            # would wipe out what was just correctly written. Skipped for
+            # --fill-gaps, which explicitly wants existing SOD rows preserved.
+            if not fill_gaps:
+                self._delete_existing_sod(sod_date, sources, portfolio_filter, security_filter)
+
+            for item in pending_settlements:
+                portfolio  = item.get('portfolio_id', '')
+                security   = item.get('security_id', '')
+                basis      = item.get('position_basis', 'SETTLED')
+                trade_type = item.get('trade_type', '')
+                qty        = Decimal(str(item.get('quantity', 0) or 0))
+                price      = Decimal(str(item.get('price', 0) or 0))
+                charges    = Decimal(str(item.get('charges', 0) or 0))
+                queue_id   = item.get('queue_id')
+                trade_id   = item.get('trade_id')
+                raw_lc     = item.get('total_amount_lc')
+                raw_glc    = item.get('gross_amount_lc')
+                raw_gfc    = item.get('gross_amount_fc')
+                trade_lc        = Decimal(str(raw_lc)) if raw_lc else None
+                gross_amount_lc = Decimal(str(raw_glc)) if raw_glc else None
+                gross_amount_fc = Decimal(str(raw_gfc)) if raw_gfc else None
+
+                try:
+                    success, message, _ = position_service.calculate_position(
+                        portfolio_id=portfolio,
+                        security_id=security,
+                        trade_type=trade_type,
+                        quantity=qty,
+                        price=price,
+                        charges=charges,
+                        position_date=sod_date,
+                        trade_id=trade_id,
+                        updated_by='SOD_SNAPSHOT',
+                        security_currency=item.get('security_currency'),
+                        portfolio_currency=item.get('portfolio_currency'),
+                        isin=item.get('isin'),
+                        security_name=item.get('security_name'),
+                        custodian=item.get('custodian'),
+                        sub_custodian=item.get('sub_custodian'),
+                        position_basis=basis,
+                        position_type='SOD',
+                        trade_lc=trade_lc,
+                        gross_amount_lc=gross_amount_lc,
+                        gross_amount_fc=gross_amount_fc,
+                    )
+                    if success:
+                        settled_queue_ids.append(queue_id)
+                        affected_keys.add((portfolio, security, basis))
+                        self.stdout.write(
+                            f"  Applied {trade_type} {qty} {security} "
+                            f"({portfolio}/{basis}) -> cis_trade_position + cis_position (SOD)"
+                        )
+                    else:
+                        failed_queue_ids.append(queue_id)
+                        logger.error(
+                            f"[SOD settlement] queue_id={queue_id} trade_id={trade_id} "
+                            f"failed: {message}"
+                        )
+                except Exception as exc:
+                    failed_queue_ids.append(queue_id)
+                    logger.error(
+                        f"[SOD settlement] Failed to apply queue_id={queue_id}: {exc}",
+                        exc_info=True
+                    )
+
+        # sod_rows: plain EOD-copy for every key NOT already written by the
+        # settlement engine above (untouched positions, and any that failed
+        # to apply — those fall back to their unmodified EOD figure rather
+        # than being silently dropped).
+        sod_rows = [row for key, row in eod_index.items() if key not in affected_keys]
+
+        self.stdout.write(
+            f"SOD rows to write (plain EOD copy): {len(sod_rows)}  "
+            f"({len(settled_queue_ids)} settlement(s) applied via AVP engine, "
+            f"{len(failed_queue_ids)} failed)"
+        )
+
+        if dry_run:
+            for r in sod_rows[:10]:
+                self.stdout.write(
+                    f"  [DRY RUN] SOD  {r.get('portfolio')}/{r.get('security_label')}  "
+                    f"basis={r.get('position_basis')}  qty={r.get('quantity')}"
+                )
+            if len(sod_rows) > 10:
+                self.stdout.write(f"  ... and {len(sod_rows) - 10} more")
+            self.stdout.write(self.style.WARNING('\nDRY RUN — no changes written'))
+            return
+
+        # ── 4. EOD rows are NOT touched — is_latest stays as-is ─────────────
+        #
+        # EOD is the latest record for its own date (eod_date). SOD is a new
+        # record for sod_date (a different position_date) with its own
+        # position_id. The two rows coexist independently — EOD retains
+        # is_latest=true for eod_date, SOD is inserted with is_latest=true
+        # for sod_date. No need to touch the EOD rows at all.
+
+        # ── 5. Delete any existing SOD rows for sod_date (idempotent re-run) ─
+        # Already done above (step 3), before the settlement-engine writes,
+        # so those writes survive. Nothing left to do here.
+
+        # ── 6. Batch-insert SOD rows with is_latest=true ─────────────────────
+        inserted = self._batch_insert_sod(sod_rows, sod_date, proc_date)
+
+        # ── 7. Mark processed settlements as COMPLETED ───────────────────────
+        if settled_queue_ids:
+            self._mark_settlements_completed(settled_queue_ids)
+            self.stdout.write(
+                f"Marked {len(settled_queue_ids)} settlement queue item(s) as COMPLETED"
+            )
+
+        if failed_queue_ids:
+            self._mark_settlements_failed(failed_queue_ids)
+            self.stdout.write(self.style.WARNING(
+                f"Marked {len(failed_queue_ids)} settlement queue item(s) as FAILED "
+                f"(check logs for details)"
+            ))
+
+        self.stdout.write('')
+        self.stdout.write(self.style.MIGRATE_HEADING('=' * 80))
+        self.stdout.write(self.style.SUCCESS(
+            f'SOD snapshot complete — {inserted} row(s) inserted '
+            f'({len(settled_queue_ids)} settlement(s) applied)'
+        ))
+
+    # ── Business date lookup ─────────────────────────────────────────────────
+
+    def _get_business_dates(self):
+        """
+        Return (contextual_today, reporting_date) as YYYYMMDD strings from the
+        gmp_cis_sta_dly_alldatesinfo reference table.
+
+        contextual_today gives the SOD position_date (today's business date).
+        reporting_date gives the source EOD date to copy forward as SOD — not
+        prev_day, since prev_day is just calendar T-1 and can diverge from the
+        last date EOD data was actually reported for (e.g. after a holiday or
+        a data-load lag).
+        """
+        try:
+            rows = impala_manager.execute_query(
+                f"""
+                SELECT contextual_today, reporting_date
+                FROM {DATABASE}.gmp_cis_sta_dly_alldatesinfo
+                WHERE src_system   = 'gmp'
+                  AND sub_system   = 'cis'
+                  AND data_frq     = 'dly'
+                  AND record_type  = 'D'
+                  AND processing_date = (
+                      SELECT MAX(processing_date)
+                      FROM {DATABASE}.gmp_cis_sta_dly_alldatesinfo
+                      WHERE src_system = 'gmp'
+                        AND sub_system = 'cis'
+                        AND data_frq   = 'dly'
+                        AND record_type = 'D'
+                  )
+                LIMIT 1
+                """,
+                database=DATABASE
+            )
+            if rows:
+                return rows[0].get('contextual_today'), rows[0].get('reporting_date')
+        except Exception as e:
+            logger.error(f'Error reading business dates: {e}')
+        return None, None
+
+    # ── EOD row fetch ─────────────────────────────────────────────────────────
+
+    def _get_eod_rows(self, eod_date, sources, portfolio_filter,
+                      security_filter=None, fill_gaps=False, sod_date=None):
+        """
+        Fetch EOD rows from cis_position for the given date (written by refresh_positions).
+
+        fill_gaps=True: excludes natural keys that already have a SOD row for sod_date,
+                        so only positions missing a SOD row are returned.
+        """
+        src_list    = ', '.join(f"'{self._escape(s)}'" for s in sources)
+        port_clause = (
+            f"AND portfolio = '{self._escape(portfolio_filter)}'"
+            if portfolio_filter else ''
+        )
+        security_clause = (
+            f"AND p.security_label = '{self._escape(security_filter)}'"
+            if security_filter else ''
+        )
+
+        # --fill-gaps: LEFT JOIN existing SOD rows and exclude matches
+        fill_gaps_join  = ""
+        fill_gaps_where = ""
+        if fill_gaps and sod_date:
+            escaped_sod = self._escape(sod_date)
+            fill_gaps_join = f"""
+            LEFT JOIN (
+                SELECT DISTINCT portfolio, security_label, position_basis
+                FROM {DATABASE}.cis_position
+                WHERE position_type = 'SOD'
+                  AND is_latest     = true
+                  AND position_date = '{escaped_sod}'
+            ) existing_sod
+              ON p.portfolio      = existing_sod.portfolio
+             AND p.security_label = existing_sod.security_label
+             AND p.position_basis = existing_sod.position_basis
+            """
+            fill_gaps_where = "AND existing_sod.portfolio IS NULL"
+
+        try:
+            return impala_manager.execute_query(
+                f"""
+                SELECT
+                    p.position_id, p.version_id,
+                    p.portfolio, p.security_label,
+                    p.position_basis, p.position_date,
+                    p.src_system, p.processing_date,
+                    p.quantity,
+                    p.average_cost_fc, p.cost_fc,
+                    p.average_cost_lc, p.cost_lc,
+                    p.market_value_fc, p.market_value_lc,
+                    p.net_book_value_fc, p.net_book_value_lc,
+                    p.unrealized_pnl_fc, p.unrealized_pnl_lc,
+                    p.realized_pnl_fc, p.realized_pnl_lc,
+                    p.provision_fc, p.provision_lc,
+                    p.dividend_fc, p.dividend_lc,
+                    p.uncall_fc, p.uncall_lc,
+                    p.pipeline_fc, p.pipeline_lc,
+                    p.position_type, p.isin, p.source_table, p.processing_timestamp
+                FROM {DATABASE}.cis_position p
+                {fill_gaps_join}
+                WHERE p.position_type = 'EOD'
+                  AND p.position_date  = '{eod_date}'
+                  AND p.src_system IN ({src_list})
+                  {port_clause}
+                  {security_clause}
+                  {fill_gaps_where}
+                """,
+                database=DATABASE
+            ) or []
+        except Exception as e:
+            logger.error(f'Error fetching EOD rows for {eod_date}: {e}')
+            raise
+
+    # ── Settlement queue fetch ────────────────────────────────────────────────
+
+    def _get_pending_settlements(self, settle_date: str):
+        """
+        Fetch PENDING settlement queue entries with settle_date == today.
+
+        Only entries settling today are folded into SOD.  Future entries
+        (settle_date > today) remain in the queue for a later SOD run.
+
+        Joins cis_trade to pick up total_amount_lc (the as-traded LC amount
+        entered by the user at booking time) — needed for NON-REVAL portfolios.
+        """
+        try:
+            return impala_manager.execute_query(
+                f"""
+                SELECT
+                    q.queue_id, q.trade_id,
+                    q.portfolio_id, q.security_id,
+                    q.trade_type,
+                    q.quantity, q.price, q.charges,
+                    q.settle_date, q.position_basis,
+                    q.security_currency, q.portfolio_currency,
+                    q.isin, q.security_name,
+                    q.custodian, q.sub_custodian,
+                    t.total_amount_lc, t.gross_amount_lc, t.gross_amount_fc
+                FROM {DATABASE}.cis_settlement_queue q
+                LEFT JOIN {DATABASE}.cis_trade t ON t.trade_id = q.trade_id
+                WHERE q.settle_date = '{settle_date}'
+                  AND q.status      = 'PENDING'
+                ORDER BY q.queued_at ASC
+                """,
+                database=DATABASE
+            ) or []
+        except Exception as e:
+            logger.error(f'Error fetching pending settlements for {settle_date}: {e}')
+            return []
+
+    # ── Delete existing SOD rows ─────────────────────────────────────────────
+
+    def _delete_existing_sod(self, sod_date, sources, portfolio_filter, security_filter=None):
+        """Remove any SOD rows already written for sod_date (idempotent re-run)."""
+        src_list   = ', '.join(f"'{self._escape(s)}'" for s in sources)
+        port_clause = (
+            f"AND portfolio = '{self._escape(portfolio_filter)}'"
+            if portfolio_filter else ''
+        )
+        security_clause = (
+            f"AND security_label = '{self._escape(security_filter)}'"
+            if security_filter else ''
+        )
+        try:
+            impala_manager.execute_write(
+                f"""
+                DELETE FROM {DATABASE}.cis_position
+                WHERE position_type = 'SOD'
+                  AND position_date  = '{sod_date}'
+                  AND src_system IN ({src_list})
+                  {port_clause}
+                  {security_clause}
+                """,
+                database=DATABASE
+            )
+            self.stdout.write(f'Cleared existing SOD rows for {sod_date}')
+        except Exception as e:
+            logger.error(f'Error deleting existing SOD rows: {e}')
+            raise
+
+    # ── Batch INSERT ─────────────────────────────────────────────────────────
+
+    def _batch_insert_sod(self, sod_rows, sod_date, proc_date):
+        """
+        UPSERT SOD rows into cis_position in batches of 500.
+
+        SOD is a new position_date, so every row gets a NEW position_id:
+          - CIS / GMP / AMS_STREET : random (timestamp-based sequential)
+          - USER_UPLOAD          : deterministic fnv_hash of the natural key
+                                   (portfolio|security_label|position_basis|
+                                    sod_date|src_system)
+                                   — ensures re-running SOD for the same date
+                                     replaces rather than duplicates.
+
+        version_id is always a new timestamp value (records when SOD ran).
+        is_latest = true — this SOD row is now the authoritative current state.
+        """
+        BATCH  = 500
+        now_ms = int(datetime.now().timestamp() * 1000)
+
+        UPLOAD_SOURCES = {'USER_UPLOAD'}
+
+        col_list = """(
+            position_id, version_id,
+            portfolio, security_label, position_basis, position_date,
+            src_system, processing_date,
+            quantity,
+            average_cost_fc, cost_fc,
+            average_cost_lc, cost_lc,
+            market_value_fc, market_value_lc,
+            net_book_value_fc, net_book_value_lc,
+            unrealized_pnl_fc, unrealized_pnl_lc,
+            realized_pnl_fc, realized_pnl_lc,
+            provision_fc, provision_lc,
+            dividend_fc, dividend_lc,
+            uncall_fc, uncall_lc,
+            pipeline_fc, pipeline_lc,
+            position_type, isin, source_table, is_latest, processing_timestamp
+        )"""
+
+        def _val(v, default=0):
+            return float(v) if v is not None else float(default)
+
+        def _fnv_hash_expr(portfolio, security, basis, date, src):
+            """
+            Impala fnv_hash expression for a USER_UPLOAD SOD position_id.
+            Uses the same 5-component natural key as all other writers —
+            INT, EOD, SOD for the same natural key share the same position_id
+            and coexist via the composite PK (position_id, position_type).
+
+            NOTE: Only call this for values that contain no single quotes.
+            For values with single quotes, use _py_fnv_hash instead.
+            """
+            p = portfolio.replace('\\', '\\\\').replace("'", "\\'")
+            s = security.replace('\\', '\\\\').replace("'", "\\'")
+            b = basis.replace('\\', '\\\\').replace("'", "\\'")
+            d = date
+            sy = src.replace('\\', '\\\\').replace("'", "\\'")
+            return (
+                f"ABS(CAST(fnv_hash(CONCAT_WS('|', "
+                f"'{p}', '{s}', '{b}', '{d}', '{sy}'"
+                f")) AS BIGINT))"
+            )
+
+        def _py_fnv_hash(portfolio, security, basis, date, src):
+            """
+            Python-side FNV-1a 64-bit hash matching Impala's fnv_hash(CONCAT_WS('|', ...)).
+            Used for rows with special chars (e.g. single quotes) to avoid SQL escaping issues.
+            Returns ABS value as int (same as ABS(CAST(fnv_hash(...) AS BIGINT))).
+            """
+            FNV_PRIME    = 0x00000100000001B3
+            FNV_OFFSET   = 0xCBF29CE484222325
+            MASK_64      = 0xFFFFFFFFFFFFFFFF
+            INT64_MAX    = 0x7FFFFFFFFFFFFFFF
+
+            concatenated = '|'.join([portfolio, security, basis, date, src])
+            encoded = concatenated.encode('utf-8')
+            h = FNV_OFFSET
+            for byte in encoded:
+                h ^= byte
+                h  = (h * FNV_PRIME) & MASK_64
+            # Convert to signed int64 then take abs
+            signed = h if h <= INT64_MAX else h - (1 << 64)
+            return abs(signed)
+
+        def _build_row(idx, row, force_py_hash=False):
+            # Raw values for fnv_hash (escape happens inside _fnv_hash_expr)
+            raw_portfolio = str(row.get('portfolio', '') or '')
+            raw_security  = str(row.get('security_label', '') or '')
+            raw_basis     = str(row.get('position_basis', 'TRADED') or 'TRADED')
+            raw_src       = str(row.get('src_system', 'CIS') or 'CIS')
+
+            # Escaped values for SQL VALUES clause
+            portfolio = self._escape(raw_portfolio)
+            security  = self._escape(raw_security)
+            pos_basis = self._escape(raw_basis)
+            src_sys   = self._escape(raw_src)
+            isin_val  = f"'{self._escape(row['isin'])}'" if row.get('isin') else 'NULL'
+            src_tbl   = f"'{self._escape(row['source_table'])}'" if row.get('source_table') else 'NULL'
+
+            version_id = now_ms + idx   # new: records when SOD ran
+
+            # position_id: deterministic for uploads, random for CIS sources.
+            # When force_py_hash=True (special-char rows), compute hash in Python
+            # to avoid embedding escaped quotes inside fnv_hash() SQL expression.
+            if row.get('src_system', '') in UPLOAD_SOURCES:
+                if force_py_hash:
+                    position_id_expr = str(_py_fnv_hash(
+                        raw_portfolio, raw_security, raw_basis, sod_date, raw_src
+                    ))
+                else:
+                    position_id_expr = _fnv_hash_expr(
+                        raw_portfolio, raw_security, raw_basis, sod_date, raw_src
+                    )
+            else:
+                position_id_expr = str(now_ms + idx + 1_000_000)
+
+            return (
+                f"({position_id_expr}, {version_id}, "
+                f"'{portfolio}', '{security}', '{pos_basis}', '{sod_date}', "
+                f"'{src_sys}', '{proc_date}', "
+                f"{_val(row.get('quantity'))}, "
+                f"{_val(row.get('average_cost_fc'))}, {_val(row.get('cost_fc'))}, "
+                f"{_val(row.get('average_cost_lc'))}, {_val(row.get('cost_lc'))}, "
+                f"{_val(row.get('market_value_fc'))}, {_val(row.get('market_value_lc'))}, "
+                f"{_val(row.get('net_book_value_fc'))}, {_val(row.get('net_book_value_lc'))}, "
+                f"{_val(row.get('unrealized_pnl_fc'))}, {_val(row.get('unrealized_pnl_lc'))}, "
+                f"{_val(row.get('realized_pnl_fc'))}, {_val(row.get('realized_pnl_lc'))}, "
+                f"{_val(row.get('provision_fc'))}, {_val(row.get('provision_lc'))}, "
+                f"{_val(row.get('dividend_fc'))}, {_val(row.get('dividend_lc'))}, "
+                f"{_val(row.get('uncall_fc'))}, {_val(row.get('uncall_lc'))}, "
+                f"{_val(row.get('pipeline_fc'))}, {_val(row.get('pipeline_lc'))}, "
+                f"'SOD', {isin_val}, {src_tbl}, true, '{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}')"
+            )
+
+        def _has_special_chars(row):
+            """Return True if any string field contains a single quote."""
+            for field in ('portfolio', 'security_label', 'position_basis', 'src_system',
+                          'isin', 'source_table'):
+                v = row.get(field) or ''
+                if "'" in str(v):
+                    return True
+            return False
+
+        total = 0
+        for i in range(0, len(sod_rows), BATCH):
+            chunk = sod_rows[i: i + BATCH]
+
+            # Split chunk: rows with special chars (single quotes) are inserted
+            # one-by-one using force_py_hash=True so the fnv_hash SQL expression
+            # is replaced with a pre-computed integer — avoiding PyHive's parser
+            # bug where '' inside fnv_hash(CONCAT_WS(...)) triggers a ParseException.
+            normal_rows  = [(j, r) for j, r in enumerate(chunk) if not _has_special_chars(r)]
+            special_rows = [(j, r) for j, r in enumerate(chunk) if _has_special_chars(r)]
+
+            # Batch insert normal rows (no special chars — safe for batching)
+            if normal_rows:
+                values = ',\n'.join(_build_row(i + j, r) for j, r in normal_rows)
+                impala_manager.execute_write(
+                    f"UPSERT INTO {DATABASE}.cis_position {col_list} VALUES {values}",
+                    database=DATABASE
+                )
+
+            # Insert special-char rows one at a time with py-computed position_id
+            for j, r in special_rows:
+                value = _build_row(i + j, r, force_py_hash=True)
+                impala_manager.execute_write(
+                    f"UPSERT INTO {DATABASE}.cis_position {col_list} VALUES {value}",
+                    database=DATABASE
+                )
+
+            total += len(chunk)
+            self.stdout.write(f'  Inserted rows {i + 1}–{i + len(chunk)}')
+
+        return total
+
+    # ── Mark settlement queue entries ────────────────────────────────────────
+
+    def _mark_settlements_completed(self, queue_ids: list):
+        """Mark processed settlement queue entries as COMPLETED."""
+        if not queue_ids:
+            return
+        ids_csv   = ', '.join(str(qid) for qid in queue_ids)
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        try:
+            impala_manager.execute_write(
+                f"""
+                UPDATE {DATABASE}.cis_settlement_queue
+                SET status       = 'COMPLETED',
+                    processed_at = '{timestamp}',
+                    updated_at   = '{timestamp}'
+                WHERE queue_id IN ({ids_csv})
+                """,
+                database=DATABASE
+            )
+        except Exception as e:
+            logger.error(f'Error marking settlements completed: {e}')
+
+    def _mark_settlements_failed(self, queue_ids: list):
+        """Mark failed settlement queue entries as FAILED."""
+        if not queue_ids:
+            return
+        ids_csv   = ', '.join(str(qid) for qid in queue_ids)
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        try:
+            impala_manager.execute_write(
+                f"""
+                UPDATE {DATABASE}.cis_settlement_queue
+                SET status     = 'FAILED',
+                    updated_at = '{timestamp}',
+                    error_message = 'Failed during SOD settlement application — see logs'
+                WHERE queue_id IN ({ids_csv})
+                """,
+                database=DATABASE
+            )
+        except Exception as e:
+            logger.error(f'Error marking settlements failed: {e}')
+
+    # ── Helpers ───────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _escape(value):
+        # Impala uses C-style \' escaping, not doubled quotes.
+        if value is None:
+            return ''
+        return str(value).replace('\\', '\\\\').replace("'", "\\'")
+
+    @staticmethod
+    def _to_iso(yyyymmdd):
+        """Convert YYYYMMDD string to YYYY-MM-DD."""
+        s = str(yyyymmdd).strip()
+        if len(s) == 8:
+            return f'{s[:4]}-{s[4:6]}-{s[6:]}'
+        return s

@@ -1,0 +1,100 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}RBAC Users - CisTrade{% endblock %}
+
+{% block breadcrumb %}
+    <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
+    <li class="breadcrumb-item"><a href="{% url 'core:rbac_dashboard' %}">RBAC Admin</a></li>
+    <li class="breadcrumb-item active">Users</li>
+{% endblock %}
+
+{% block content %}
+<div class="content-header d-flex justify-content-between align-items-start">
+    <div>
+        <h1 class="content-title"><i class="bi bi-people text-primary"></i> Users</h1>
+        <p class="content-subtitle">{{ users|length }} user{{ users|length|pluralize }} found</p>
+    </div>
+    <div class="d-flex gap-2">
+        <a href="?include_inactive={% if include_inactive %}0{% else %}1{% endif %}" class="btn btn-outline-secondary btn-sm">
+            {% if include_inactive %}<i class="bi bi-eye-slash"></i> Hide Inactive{% else %}<i class="bi bi-eye"></i> Show Inactive{% endif %}
+        </a>
+        <a href="{% url 'core:rbac_user_create' %}" class="btn btn-primary btn-sm">
+            <i class="bi bi-person-plus"></i> New User
+        </a>
+    </div>
+</div>
+
+{% if messages %}
+<div class="mb-3">
+    {% for msg in messages %}
+    <div class="alert alert-{% if msg.tags == 'error' %}danger{% else %}{{ msg.tags }}{% endif %} alert-dismissible fade show py-2">
+        {{ msg }} <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
+<div class="card">
+    <div class="card-body p-0">
+        {% if users %}
+        <div class="table-responsive">
+            <table class="table table-hover table-sm mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>Login</th>
+                        <th>Name</th>
+                        <th>Email</th>
+                        <th>Entity</th>
+                        <th>Status</th>
+                        <th>Created</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for u in users %}
+                    <tr>
+                        <td><strong>{{ u.login }}</strong></td>
+                        <td>{{ u.name|default:"-" }}</td>
+                        <td class="text-muted small">{{ u.email|default:"-" }}</td>
+                        <td><span class="badge bg-light text-dark">{{ u.default_entity|default:"-" }}</span></td>
+                        <td>
+                            {% if u.is_active %}
+                                <span class="badge bg-success">Active</span>
+                            {% else %}
+                                <span class="badge bg-secondary">Inactive</span>
+                            {% endif %}
+                        </td>
+                        <td class="text-muted small">{{ u.created_on|default:"-" }}</td>
+                        <td>
+                            <div class="d-flex gap-1">
+                                <a href="{% url 'core:rbac_user_edit' u.user_id %}" class="btn btn-outline-primary btn-sm" title="Edit">
+                                    <i class="bi bi-pencil"></i>
+                                </a>
+                                <a href="{% url 'core:rbac_user_groups' u.user_id %}" class="btn btn-outline-success btn-sm" title="Manage Groups">
+                                    <i class="bi bi-collection"></i>
+                                </a>
+                                {% if u.is_active %}
+                                <form method="post" action="{% url 'core:rbac_user_deactivate' u.user_id %}" style="display:inline;" onsubmit="return confirm('Deactivate user {{ u.login }}?')">
+                                    {% csrf_token %}
+                                    <button type="submit" class="btn btn-outline-danger btn-sm" title="Deactivate">
+                                        <i class="bi bi-person-x"></i>
+                                    </button>
+                                </form>
+                                {% endif %}
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="text-center py-5 text-muted">
+            <i class="bi bi-people" style="font-size: 3rem; opacity: 0.3;"></i>
+            <p class="mt-3">No users found.</p>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

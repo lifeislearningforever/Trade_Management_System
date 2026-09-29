@@ -1,0 +1,317 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Position Detail - CisTrade{% endblock %}
+
+{% block breadcrumb %}
+    <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
+    <li class="breadcrumb-item"><a href="{% url 'trade:list' %}">Trades</a></li>
+    <li class="breadcrumb-item"><a href="{% url 'trade:position_list' %}">Positions</a></li>
+    <li class="breadcrumb-item active">{{ position.portfolio_short_name }} / {{ position.security_label }}</li>
+{% endblock %}
+
+{% block content %}
+<div class="position-detail-container">
+    <!-- Page Header -->
+    <div class="content-header d-flex justify-content-between align-items-center">
+        <div>
+            <h1 class="content-title">
+                <i class="bi bi-graph-up-arrow text-primary"></i> Position: {{ position.portfolio_short_name }} / {{ position.security_label }}
+            </h1>
+            <p class="content-subtitle">Position Details and History{% if currency_code %} <span class="badge badge-info">{{ currency_code }}</span>{% endif %}</p>
+        </div>
+    </div>
+
+    <!-- Security & Classification Info -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">
+                        <i class="bi bi-info-circle"></i> Security & Classification
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-2">
+                            <label class="form-label text-muted small">ISIN</label>
+                            <div class="fw-bold"><code>{{ position.isin|default:"-" }}</code></div>
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label text-muted small">Security Currency</label>
+                            <div><span class="badge bg-secondary">{{ position.security_currency|default:"-" }}</span></div>
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label text-muted small">Portfolio Currency</label>
+                            <div><span class="badge bg-info">{{ position.portfolio_currency|default:"-" }}</span></div>
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label text-muted small">Country</label>
+                            <div class="fw-bold">{{ position.country|default:"-" }}</div>
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label text-muted small">Asset Class</label>
+                            <div class="fw-bold">{{ position.asset_class|default:"-" }}</div>
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label text-muted small">Listing Status</label>
+                            <div class="fw-bold">{{ position.listing_status|default:"-" }}</div>
+                        </div>
+                    </div>
+                    <div class="row mt-3">
+                        <div class="col-md-2">
+                            <label class="form-label text-muted small">Valuation Date</label>
+                            <div class="fw-bold">{{ position.valuation_date|default:"-" }}</div>
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label text-muted small">Source System</label>
+                            <div><span class="badge bg-light text-dark">{{ position.src_system|default:"-" }}</span></div>
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label text-muted small">Market Unit Price</label>
+                            <div class="fw-bold">{{ position.market_unit_price|floatformat:8|default:"-" }}</div>
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label text-muted small">% Ratio</label>
+                            <div class="fw-bold">{{ position.pct_ratio|floatformat:4|default:"-" }}%</div>
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label text-muted small">Status</label>
+                            <div>
+                                {% if position.status == 'OPEN' %}
+                                    <span class="badge badge-success">OPEN</span>
+                                {% elif position.status == 'CLOSED' %}
+                                    <span class="badge badge-secondary">CLOSED</span>
+                                {% else %}
+                                    <span class="badge badge-info">{{ position.status|default:"UNKNOWN" }}</span>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Summary Cards Row -->
+    <div class="row mb-4">
+        <!-- Holdings & Cost Card -->
+        <div class="col-lg-4 mb-3">
+            <div class="card h-100">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">
+                        <i class="bi bi-box"></i> Holdings & Cost
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label class="form-label text-muted small">Quantity</label>
+                        <div class="fw-bold fs-4">{{ position.quantity|floatformat:2 }}</div>
+                    </div>
+                    <div class="row">
+                        <div class="col-6">
+                            <label class="form-label text-muted small">Cost (Local - {{ position.security_currency|default:"SEC" }})</label>
+                            <div class="fw-bold">{{ position.cost_value_local|floatformat:2|default:"0.00" }}</div>
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label text-muted small">Cost (Base - {{ position.portfolio_currency|default:"PORT" }})</label>
+                            <div class="fw-bold text-primary">{{ position.cost_value_base|floatformat:2|default:"0.00" }}</div>
+                        </div>
+                    </div>
+                    <hr class="my-2">
+                    <div class="row">
+                        <div class="col-6">
+                            <label class="form-label text-muted small">Avg Cost (FC)</label>
+                            <div class="fw-bold">{{ position.average_cost_fc|default:position.average_cost|floatformat:8|default:"0.00000000" }}</div>
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label text-muted small">Total Cost (FC)</label>
+                            <div class="fw-bold">{{ position.total_cost_fc|default:position.total_cost|floatformat:2|default:"0.00" }}</div>
+                        </div>
+                    </div>
+                    <div class="row mt-2">
+                        <div class="col-6">
+                            <label class="form-label text-muted small">Dividend (FC)</label>
+                            <div class="fw-bold text-info">{{ position.dividend_fc|floatformat:2|default:"0.00" }}</div>
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label text-muted small">Dividend (LC)</label>
+                            <div class="fw-bold text-info">{{ position.dividend_lc|floatformat:2|default:"0.00" }}</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Market Valuation Card -->
+        <div class="col-lg-4 mb-3">
+            <div class="card h-100">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">
+                        <i class="bi bi-currency-dollar"></i> Market Valuation
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label class="form-label text-muted small">Market Price</label>
+                        <div class="fw-bold fs-4">{{ position.market_price|default:position.market_unit_price|default:position.current_price|floatformat:8|default:"0.00000000" }}</div>
+                    </div>
+                    <div class="row">
+                        <div class="col-6">
+                            <label class="form-label text-muted small">Market Value (Local - {{ position.security_currency|default:"SEC" }})</label>
+                            <div class="fw-bold">{{ position.market_value_local|floatformat:2|default:"0.00" }}</div>
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label text-muted small">Market Value (Base - {{ position.portfolio_currency|default:"PORT" }})</label>
+                            <div class="fw-bold text-success">{{ position.market_value_base|floatformat:2|default:"0.00" }}</div>
+                        </div>
+                    </div>
+                    <hr class="my-2">
+                    <div>
+                        <label class="form-label text-muted small">Market Value (FC)</label>
+                        <div class="fw-bold">{{ position.market_value_fc|default:position.market_value|floatformat:2|default:"0.00" }}</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Unrealized P&L Card -->
+        <div class="col-lg-4 mb-3">
+            <div class="card h-100">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">
+                        <i class="bi bi-graph-up-arrow"></i> Unrealized P&L
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="row mb-3">
+                        <div class="col-6">
+                            <label class="form-label text-muted small">P&L (Local - {{ position.security_currency|default:"SEC" }})</label>
+                            <div class="fw-bold fs-5 {% if position.unrealized_pnl_local >= 0 %}text-success{% else %}text-danger{% endif %}">
+                                {{ position.unrealized_pnl_local|floatformat:2|default:"0.00" }}
+                            </div>
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label text-muted small">P&L (Base - {{ position.portfolio_currency|default:"PORT" }})</label>
+                            <div class="fw-bold fs-5 {% if position.unrealized_pnl_base >= 0 %}text-success{% else %}text-danger{% endif %}">
+                                {{ position.unrealized_pnl_base|floatformat:2|default:"0.00" }}
+                            </div>
+                        </div>
+                    </div>
+                    <hr class="my-2">
+                    <div class="row">
+                        <div class="col-6">
+                            <label class="form-label text-muted small">Unrealized P&L (Legacy)</label>
+                            <div class="fw-bold {% if position.unrealized_pnl >= 0 %}text-success{% else %}text-danger{% endif %}">
+                                {{ position.unrealized_pnl|floatformat:2|default:"0.00" }}
+                            </div>
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label text-muted small">Realized P&L</label>
+                            <div class="fw-bold {% if position.realized_pnl >= 0 %}text-success{% else %}text-danger{% endif %}">
+                                {{ position.realized_pnl|floatformat:2|default:"0.00" }}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Position Version History (Snapshots) -->
+    <div class="card mb-4">
+        <div class="card-header">
+            <h5 class="card-title mb-0">
+                <i class="bi bi-clock-history"></i> Position Version History
+                {% if position_versions %}
+                    <span class="badge badge-primary ms-2">{{ position_versions|length }} version{{ position_versions|length|pluralize }}</span>
+                {% endif %}
+            </h5>
+        </div>
+        <div class="card-body">
+            {% if position_versions %}
+            <div class="table-responsive">
+                <table class="table table-hover table-striped align-middle">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Version</th>
+                            <th>Date</th>
+                            <th>Trade Type</th>
+                            <th class="text-end">Quantity</th>
+                            <th class="text-end">Avg Cost (FC)</th>
+                            <th class="text-end">Total Cost (FC)</th>
+                            <th class="text-end">Market Value (FC)</th>
+                            <th class="text-end">Unrealized P&L</th>
+                            <th class="text-end">Dividend (FC)</th>
+                            <th>Status</th>
+                            <th>Created By</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for ver in position_versions %}
+                        <tr {% if forloop.first %}class="table-active"{% endif %}>
+                            <td><strong>{{ ver.version_id|default:"-" }}</strong></td>
+                            <td>
+                                <small>{{ ver.position_date|default:ver.created_at|default:"-" }}</small>
+                            </td>
+                            <td>
+                                {% if ver.trade_type == 'BUY' %}
+                                    <span class="badge bg-success">Buy</span>
+                                {% elif ver.trade_type == 'SELL' %}
+                                    <span class="badge bg-danger">Sell</span>
+                                {% elif ver.trade_type == 'MARKET_REFRESH' %}
+                                    <span class="badge bg-primary">Refresh</span>
+                                {% else %}
+                                    <span class="badge bg-secondary">{{ ver.trade_type|default:"-" }}</span>
+                                {% endif %}
+                            </td>
+                            <td class="text-end">{{ ver.quantity|floatformat:2|default:"0.00" }}</td>
+                            <td class="text-end">{{ ver.average_cost_fc|default:ver.average_cost|floatformat:8|default:"0.00000000" }}</td>
+                            <td class="text-end">{{ ver.total_cost_fc|default:ver.total_cost|floatformat:2|default:"0.00" }}</td>
+                            <td class="text-end">{{ ver.market_value_fc|default:ver.market_value|floatformat:2|default:"0.00" }}</td>
+                            <td class="text-end">
+                                {% if ver.unrealized_pnl_fc > 0 %}
+                                    <span class="text-success fw-bold">{{ ver.unrealized_pnl_fc|floatformat:2 }}</span>
+                                {% elif ver.unrealized_pnl_fc < 0 %}
+                                    <span class="text-danger fw-bold">{{ ver.unrealized_pnl_fc|floatformat:2 }}</span>
+                                {% else %}
+                                    {{ ver.unrealized_pnl_fc|default:ver.unrealized_pnl|floatformat:2|default:"0.00" }}
+                                {% endif %}
+                            </td>
+                            <td class="text-end text-info">{{ ver.dividend_fc|floatformat:2|default:"0.00" }}</td>
+                            <td>
+                                {% if ver.status == 'OPEN' %}
+                                    <span class="badge badge-success">Open</span>
+                                {% elif ver.status == 'CLOSED' %}
+                                    <span class="badge badge-secondary">Closed</span>
+                                {% else %}
+                                    <span class="badge badge-info">{{ ver.status|default:"-" }}</span>
+                                {% endif %}
+                            </td>
+                            <td>{{ ver.created_by|default:"-" }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="alert alert-info mb-0">
+                <i class="bi bi-info-circle"></i> No position versions available.
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Action Buttons and Last Updated -->
+    <div class="d-flex justify-content-between align-items-center">
+        <a href="{% url 'trade:position_list' %}" class="btn btn-outline-secondary">
+            <i class="bi bi-arrow-left"></i> Back to Positions
+        </a>
+        <div class="text-muted">
+            <small>
+                <i class="bi bi-clock"></i> Last updated: {{ position.updated_at|default:"-" }}
+            </small>
+        </div>
+    </div>
+</div>
+{% endblock %}

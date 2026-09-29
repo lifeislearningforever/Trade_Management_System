@@ -1,0 +1,123 @@
+{% extends 'base.html' %}
+
+{% block title %}Group Permissions - RBAC Admin{% endblock %}
+
+{% block breadcrumb %}
+    <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
+    <li class="breadcrumb-item"><a href="{% url 'core:rbac_dashboard' %}">RBAC Admin</a></li>
+    <li class="breadcrumb-item"><a href="{% url 'core:rbac_group_list' %}">Groups</a></li>
+    <li class="breadcrumb-item active">Permissions</li>
+{% endblock %}
+
+{% block content %}
+<div class="content-header">
+    <h1 class="content-title">
+        <i class="bi bi-key text-warning"></i>
+        Permissions &mdash; <strong>{{ group.group_name }}</strong>
+    </h1>
+    <p class="content-subtitle">{{ group.description|default:"" }} &bull; {{ group.entity }}</p>
+</div>
+
+{% if messages %}
+<div class="mb-3">
+    {% for msg in messages %}
+    <div class="alert alert-{% if msg.tags == 'error' %}danger{% else %}{{ msg.tags }}{% endif %} alert-dismissible fade show py-2">
+        {{ msg }} <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
+<div class="card">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <h6 class="mb-0">Permission Matrix</h6>
+        <small class="text-muted">
+            <span class="badge bg-success me-1">READ</span> view only &nbsp;
+            <span class="badge bg-primary me-1">WRITE</span> full access &nbsp;
+            blank = no access
+        </small>
+    </div>
+    <div class="card-body">
+        <form method="post">
+            {% csrf_token %}
+
+            <div class="mb-3">
+                <label class="form-label">Entity</label>
+                <select name="entity" class="form-select form-select-sm" style="max-width: 200px;">
+                    <option value="UOBS" {% if group.entity == 'UOBS' %}selected{% endif %}>UOBS</option>
+                    <option value="UOBM" {% if group.entity == 'UOBM' %}selected{% endif %}>UOBM</option>
+                    <option value="UOBT" {% if group.entity == 'UOBT' %}selected{% endif %}>UOBT</option>
+                </select>
+                <div class="form-text">Existing permissions for this entity will be replaced.</div>
+            </div>
+
+            {% if all_permissions %}
+            <div class="table-responsive">
+                <table class="table table-sm table-bordered align-middle" style="max-width: 800px;">
+                    <thead class="table-light">
+                        <tr>
+                            <th style="min-width: 220px;">Permission</th>
+                            <th>Description</th>
+                            <th class="text-center" style="width: 80px;">None</th>
+                            <th class="text-center" style="width: 80px;">READ</th>
+                            <th class="text-center" style="width: 100px;">WRITE</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for p in all_permissions %}
+                        <tr>
+                            <td><code class="small">{{ p.permission_name }}</code></td>
+                            <td class="text-muted small">{{ p.description|default:"-" }}</td>
+                            <td class="text-center">
+                                <input type="radio" name="perm_{{ p.permission_name }}"
+                                       value="" checked
+                                       class="form-check-input perm-none"
+                                       data-pname="{{ p.permission_name }}">
+                            </td>
+                            <td class="text-center">
+                                <input type="radio" name="perm_{{ p.permission_name }}"
+                                       value="READ"
+                                       class="form-check-input perm-radio"
+                                       data-pname="{{ p.permission_name }}"
+                                       data-mode="READ">
+                            </td>
+                            <td class="text-center">
+                                <input type="radio" name="perm_{{ p.permission_name }}"
+                                       value="WRITE"
+                                       class="form-check-input perm-radio"
+                                       data-pname="{{ p.permission_name }}"
+                                       data-mode="WRITE">
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="text-muted small">No permissions defined yet. <a href="{% url 'core:rbac_permission_create' %}">Create a permission</a> first.</div>
+            {% endif %}
+
+            <div class="d-flex gap-2 mt-3">
+                <button type="submit" class="btn btn-warning">
+                    <i class="bi bi-check-lg"></i> Save Permissions
+                </button>
+                <a href="{% url 'core:rbac_group_list' %}" class="btn btn-outline-secondary">Cancel</a>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+// Pre-check radios based on current_perm_map passed via data attributes
+(function() {
+    const permMap = {{ current_perm_map_json|safe }};
+    document.querySelectorAll('.perm-radio').forEach(function(radio) {
+        const pname = radio.dataset.pname;
+        const mode = radio.dataset.mode;
+        if (permMap[pname] === mode) {
+            radio.checked = true;
+        }
+    });
+})();
+</script>
+{% endblock %}
