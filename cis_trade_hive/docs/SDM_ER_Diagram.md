@@ -85,7 +85,7 @@ erDiagram
     }
 
     CIS_PARTY_CIF {
-        string party_name PK_FK
+        string party_name PK,FK
         string m_label PK "CIF number"
         string country PK
         string isin
@@ -280,12 +280,12 @@ erDiagram
     }
 
     CIS_USER_GROUP {
-        bigint user_id PK_FK
-        bigint group_id PK_FK
+        bigint user_id PK,FK
+        bigint group_id PK,FK
     }
 
     CIS_GROUP_PERMISSIONS {
-        bigint group_id PK_FK
+        bigint group_id PK,FK
         string module
         boolean can_view
         boolean can_create
