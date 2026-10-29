@@ -1,0 +1,111 @@
+{% extends 'hive_poc/base.html' %}
+{% block title %}{% if is_edit %}Edit{% else %}Create{% endif %} Trade{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-10">
+        <div class="card">
+            <div class="card-header">
+                {% if is_edit %}Edit Trade: {{ trade.trade_id }}{% else %}Create New Trade{% endif %}
+            </div>
+            <div class="card-body">
+                <form method="post">
+                    {% csrf_token %}
+
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label for="portfolio_id" class="form-label">Portfolio *</label>
+                            <select class="form-select" id="portfolio_id" name="portfolio_id" required>
+                                <option value="">-- Select Portfolio --</option>
+                                {% for p in portfolios %}
+                                <option value="{{ p.id }}" {% if trade.portfolio_id == p.id %}selected{% endif %}>{{ p.name }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="trade_type" class="form-label">Trade Type *</label>
+                            <select class="form-select" id="trade_type" name="trade_type" required>
+                                {% for value, label in type_choices %}
+                                <option value="{{ value }}" {% if trade.trade_type == value %}selected{% endif %}>{{ label }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="row mb-3">
+                        <div class="col-md-4">
+                            <label for="security_id" class="form-label">Security ID (ISIN/CUSIP) *</label>
+                            <input type="text" class="form-control" id="security_id" name="security_id"
+                                   value="{{ trade.security_id|default:'' }}" required minlength="3">
+                        </div>
+                        <div class="col-md-8">
+                            <label for="security_name" class="form-label">Security Name *</label>
+                            <input type="text" class="form-control" id="security_name" name="security_name"
+                                   value="{{ trade.security_name|default:'' }}" required minlength="2">
+                        </div>
+                    </div>
+
+                    <div class="row mb-3">
+                        <div class="col-md-3">
+                            <label for="quantity" class="form-label">Quantity *</label>
+                            <input type="number" class="form-control" id="quantity" name="quantity"
+                                   value="{{ trade.quantity|default:'0' }}" required min="0.0001" step="0.0001">
+                        </div>
+                        <div class="col-md-3">
+                            <label for="price" class="form-label">Price *</label>
+                            <input type="number" class="form-control" id="price" name="price"
+                                   value="{{ trade.price|default:'0' }}" required min="0.000001" step="0.000001">
+                        </div>
+                        <div class="col-md-3">
+                            <label for="currency" class="form-label">Currency *</label>
+                            <select class="form-select" id="currency" name="currency" required>
+                                {% for value, label in currency_choices %}
+                                <option value="{{ value }}" {% if trade.currency == value %}selected{% endif %}>{{ label }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-md-3">
+                            <label for="status" class="form-label">Status *</label>
+                            <select class="form-select" id="status" name="status" required>
+                                {% for value, label in status_choices %}
+                                <option value="{{ value }}" {% if trade.status == value %}selected{% endif %}>{{ label }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="row mb-3">
+                        <div class="col-md-4">
+                            <label for="trade_date" class="form-label">Trade Date *</label>
+                            <input type="date" class="form-control" id="trade_date" name="trade_date"
+                                   value="{{ trade.trade_date|date:'Y-m-d'|default:'' }}" required>
+                        </div>
+                        <div class="col-md-4">
+                            <label for="settlement_date" class="form-label">Settlement Date</label>
+                            <input type="date" class="form-control" id="settlement_date" name="settlement_date"
+                                   value="{{ trade.settlement_date|date:'Y-m-d'|default:'' }}">
+                        </div>
+                        <div class="col-md-4">
+                            <label for="broker" class="form-label">Broker</label>
+                            <input type="text" class="form-control" id="broker" name="broker"
+                                   value="{{ trade.broker|default:'' }}">
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="notes" class="form-label">Notes</label>
+                        <textarea class="form-control" id="notes" name="notes" rows="2">{{ trade.notes|default:'' }}</textarea>
+                    </div>
+
+                    <div class="d-flex justify-content-between">
+                        <a href="{% url 'hive_poc:trade_list' %}" class="btn btn-secondary">Cancel</a>
+                        <button type="submit" class="btn btn-success">
+                            {% if is_edit %}Update{% else %}Create{% endif %} Trade
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

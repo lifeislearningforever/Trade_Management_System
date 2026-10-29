@@ -1,0 +1,305 @@
+{% extends 'base.html' %}
+{% load static core_filters %}
+
+{% block title %}Portfolios - CisTrade{% endblock %}
+
+{% block breadcrumb %}
+    <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
+    <li class="breadcrumb-item active">Portfolios</li>
+{% endblock %}
+
+{% block content %}
+<div class="portfolio-list-container" style="max-width: 100%; overflow-x: hidden;">
+    <!-- Page Header -->
+    <div class="content-header">
+        <h1 class="content-title">
+            <i class="bi bi-briefcase text-primary"></i> Portfolios
+        </h1>
+        <p class="content-subtitle">Manage portfolios with Four-Eyes principle (Maker-Checker)</p>
+    </div>
+
+    <!-- Action Buttons -->
+    <div class="mb-4">
+        {% if can_create %}
+        <a href="{% url 'portfolio:create' %}" class="btn btn-primary">
+            <i class="bi bi-plus-circle"></i> Create New Portfolio
+        </a>
+        {% endif %}
+        {% if can_approve %}
+        <a href="{% url 'portfolio:pending_validation' %}" class="btn btn-warning">
+            <i class="bi bi-clock-history"></i> Pending Approval
+            {% if pending_validation_count %}
+                <span class="badge bg-danger">{{ pending_validation_count }}</span>
+            {% endif %}
+        </a>
+        {% endif %}
+        <a href="{% url 'portfolio:dashboard' %}" class="btn btn-info">
+            <i class="bi bi-graph-up"></i> Dashboard
+        </a>
+    </div>
+
+    <!-- Search & Filter Card -->
+    <div class="card mb-4">
+        <div class="card-header">
+            <h5 class="card-title mb-0">
+                <i class="bi bi-funnel"></i> Search & Filter
+            </h5>
+        </div>
+        <div class="card-body">
+            <form method="get" action="{% url 'portfolio:list' %}" class="row g-3">
+                <div class="col-md-4">
+                    <label class="form-label">Search</label>
+                    <div class="input-group">
+                        <span class="input-group-text"><i class="bi bi-search"></i></span>
+                        <input type="text" class="form-control" name="search" value="{{ search }}"
+                               placeholder="Search by code, name, or manager...">
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Status</label>
+                    <select class="form-select" name="status">
+                        <option value="">All Statuses</option>
+                        <option value="INITIAL" {% if status == 'INITIAL' %}selected{% endif %}>Initial (Draft)</option>
+                        <option value="MODIFIED" {% if status == 'MODIFIED' %}selected{% endif %}>Modified</option>
+                        <option value="PENDING_VALIDATION" {% if status == 'PENDING_VALIDATION' %}selected{% endif %}>Pending Validation</option>
+                        <option value="VALIDATED" {% if status == 'VALIDATED' %}selected{% endif %}>Validated</option>
+                        <option value="SETTLED" {% if status == 'SETTLED' %}selected{% endif %}>Settled (Active)</option>
+                        <option value="CANCELLED" {% if status == 'CANCELLED' %}selected{% endif %}>Cancelled</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Currency</label>
+                    <input type="text" class="form-control" name="currency" value="{{ currency }}"
+                           placeholder="e.g., USD, EUR">
+                </div>
+                <div class="col-md-2 d-flex align-items-end gap-2">
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-search"></i> Search
+                    </button>
+                    <a href="{% url 'portfolio:list' %}" class="btn btn-outline-secondary">
+                        <i class="bi bi-x-circle"></i> Clear
+                    </a>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Portfolios Table -->
+    <div class="card">
+        <div class="card-header">
+            <h5 class="card-title mb-0">
+                Portfolio List
+                <span class="badge badge-primary ms-2">{{ total_count }} portfolio{{ total_count|pluralize }}</span>
+            </h5>
+            <a href="?export=csv{% if search %}&search={{ search }}{% endif %}{% if status %}&status={{ status }}{% endif %}{% if currency %}&currency={{ currency }}{% endif %}" class="btn btn-sm btn-success">
+                <i class="bi bi-download"></i> Download CSV
+            </a>
+        </div>
+        <div class="card-body p-0">
+            {% if page_obj %}
+                <div class="table-responsive" style="display: block; width: 100%; max-height: 600px; overflow-x: auto; overflow-y: auto;">
+                    <table class="table table-hover table-sm mb-0 sortable-table" style="width: max-content;">
+                        <thead class="table-light" style="position: sticky; top: 0; z-index: 10; background-color: #f8f9fa;">
+                            <tr>
+                                <th class="sortable" data-sort-type="text" style="min-width: 80px;">Source</th>
+                                <th class="sortable" data-sort-type="text" style="min-width: 180px;">Portfolio Name</th>
+                                <th class="sortable" data-sort-type="text" style="min-width: 200px;">Portfolio Description</th>
+                                <th class="sortable" data-sort-type="text" style="min-width: 100px;">Currency</th>
+                                <th class="sortable" data-sort-type="text" style="min-width: 120px;">Settlement CCY</th>
+                                <th class="sortable" data-sort-type="text" style="min-width: 100px;">Entity</th>
+                                <th class="sortable" data-sort-type="text" style="min-width: 120px;">Business Unit</th>
+                                <th class="sortable" data-sort-type="text" style="min-width: 130px;">Investment Type</th>
+                                <th class="sortable" data-sort-type="text" style="min-width: 100px;">Branch Code</th>
+                                <th class="sortable" data-sort-type="text" style="min-width: 130px;">Revaluation</th>
+                                <th class="sortable" data-sort-type="text" style="min-width: 130px;">Account Group</th>
+                                <th class="sortable" data-sort-type="text" style="min-width: 120px;">Entity Group</th>
+                                <th class="sortable" data-sort-type="text" style="min-width: 120px;">Report Group</th>
+                                <th class="sortable" data-sort-type="text" style="min-width: 140px;">Portfolio Group</th>
+                                <th class="sortable" data-sort-type="text" style="min-width: 100px;">Corp Code</th>
+                                <th class="sortable" data-sort-type="text" style="min-width: 120px;">Cost Centre</th>
+                                <th class="sortable" data-sort-type="text" style="min-width: 100px;">Country</th>
+                                <th class="sortable" data-sort-type="text" style="min-width: 130px;">Desk Head</th>
+                                <th class="sortable" data-sort-type="text" style="min-width: 150px;">Portfolio Owner</th>
+                                <th class="sortable" data-sort-type="text" style="min-width: 150px;">Manager</th>
+                                <th class="sortable" data-sort-type="text" style="min-width: 150px;">Client</th>
+                                <th class="sortable" data-sort-type="text" style="min-width: 130px;">Status</th>
+                                <th class="sortable" data-sort-type="date" style="min-width: 110px;">Created At</th>
+                                <th class="sortable" data-sort-type="date" style="min-width: 120px;">Closure Date</th>
+                                <th class="sticky-action-column" style="min-width: 200px;">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for portfolio in page_obj %}
+                            <tr {% if portfolio.status == 'CANCELLED' %}style="opacity: 0.6; background-color: #f8f9fa;"{% endif %}>
+                                <td>
+                                    {% if portfolio.src_system|upper == 'CIS' %}
+                                        <span class="badge badge-success">CIS</span>
+                                    {% else %}
+                                        <span class="badge badge-secondary">{{ portfolio.src_system|upper|default:"GMP" }}</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    <strong class="text-primary">{{ portfolio.name }}</strong>
+                                </td>
+                                <td style="max-width: 200px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="{{ portfolio.description }}">
+                                    {{ portfolio.description|default:"-" }}
+                                </td>
+                                <td>
+                                    <span class="badge badge-info">{{ portfolio.currency }}</span>
+                                </td>
+                                <td>
+                                    {% if portfolio.settlement_ccy %}
+                                        <span class="badge badge-secondary">{{ portfolio.settlement_ccy }}</span>
+                                    {% else %}-{% endif %}
+                                </td>
+                                <td>{{ portfolio.entity|default:"-" }}</td>
+                                <td>{{ portfolio.business_line|default:"-" }}</td>
+                                <td>{{ portfolio.investment_type|default:"-" }}</td>
+                                <td>{{ portfolio.branch_code|default:"-" }}</td>
+                                <td>{{ portfolio.revaluation_status|default:"-" }}</td>
+                                <td>{{ portfolio.account_group|default:"-" }}</td>
+                                <td>{{ portfolio.entity_group|default:"-" }}</td>
+                                <td>{{ portfolio.report_group|default:"-" }}</td>
+                                <td>{{ portfolio.portfolio_group|default:"-" }}</td>
+                                <td>{{ portfolio.corp_code|default:"-" }}</td>
+                                <td>{{ portfolio.cost_centre_code|default:"-" }}</td>
+                                <td>{{ portfolio.country|default:"-" }}</td>
+                                <td>{{ portfolio.desk_head|default:"-" }}</td>
+                                <td>{{ portfolio.portfolio_owner|default:"-" }}</td>
+                                <td>{{ portfolio.manager|default:"-" }}</td>
+                                <td>{{ portfolio.portfolio_client|default:"-" }}</td>
+                                <td>
+                                    {% if portfolio.status == 'INITIAL' %}
+                                        <span class="badge badge-secondary">Initial</span>
+                                    {% elif portfolio.status == 'MODIFIED' %}
+                                        <span class="badge badge-info">Modified</span>
+                                    {% elif portfolio.status == 'PENDING_VALIDATION' %}
+                                        <span class="badge badge-warning">Pending Validation</span>
+                                    {% elif portfolio.status == 'VALIDATED' %}
+                                        <span class="badge badge-primary">Validated</span>
+                                    {% elif portfolio.status == 'SETTLED' %}
+                                        <span class="badge badge-success">Settled</span>
+                                    {% elif portfolio.status == 'CANCELLED' %}
+                                        <span class="badge badge-dark">Cancelled</span>
+                                    {% else %}
+                                        <span class="badge badge-secondary">{{ portfolio.status|default:"-" }}</span>
+                                    {% endif %}
+                                </td>
+                                <td style="font-size: 0.85rem;">{{ portfolio.created_at_formatted|default:"-" }}</td>
+                                <td style="font-size: 0.85rem;">{{ portfolio.closure_date_formatted|default:"-" }}</td>
+                                <td class="sticky-action-column">
+                                    <div class="btn-group btn-group-sm" role="group">
+                                        {% if can_view %}
+                                        <a href="{% url 'portfolio:detail' portfolio.name %}" class="btn btn-sm btn-outline-primary" title="View Details">
+                                            <i class="bi bi-eye"></i>
+                                        </a>
+                                        {% endif %}
+                                        {% can_act portfolio "portfolio" as pfa %}
+                                        {% if pfa.can_edit %}
+                                            <a href="{% url 'portfolio:edit' portfolio.name %}" class="btn btn-sm btn-outline-warning" title="Edit">
+                                                <i class="bi bi-pencil"></i>
+                                            </a>
+                                        {% endif %}
+                                        {% if pfa.can_submit %}
+                                            <form method="post" action="{% url 'portfolio:submit' portfolio.name %}" class="d-inline">
+                                                {% csrf_token %}
+                                                <button type="submit" class="btn btn-sm btn-outline-info" title="Submit for Validation" onclick="return confirm('Submit for validation?')">
+                                                    <i class="bi bi-send"></i>
+                                                </button>
+                                            </form>
+                                        {% endif %}
+                                        {% if pfa.can_reactivate %}
+                                            <form method="post" action="{% url 'portfolio:reactivate' portfolio.name %}" class="d-inline">
+                                                {% csrf_token %}
+                                                <button type="submit" class="btn btn-sm btn-outline-success" title="Reactivate" onclick="return confirm('Reactivate this portfolio?')">
+                                                    <i class="bi bi-arrow-clockwise"></i>
+                                                </button>
+                                            </form>
+                                        {% endif %}
+                                    </div>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Pagination -->
+                {% if page_obj.has_other_pages %}
+                <div class="card-footer">
+                    <nav aria-label="Portfolio pagination">
+                        <ul class="pagination justify-content-center mb-0">
+                            {% if page_obj.has_previous %}
+                                <li class="page-item">
+                                    <a class="page-link" href="?page=1{% if search %}&search={{ search }}{% endif %}{% if status %}&status={{ status }}{% endif %}{% if currency %}&currency={{ currency }}{% endif %}">First</a>
+                                </li>
+                                <li class="page-item">
+                                    <a class="page-link" href="?page={{ page_obj.previous_page_number }}{% if search %}&search={{ search }}{% endif %}{% if status %}&status={{ status }}{% endif %}{% if currency %}&currency={{ currency }}{% endif %}">Previous</a>
+                                </li>
+                            {% endif %}
+
+                            <li class="page-item active">
+                                <span class="page-link">
+                                    Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}
+                                </span>
+                            </li>
+
+                            {% if page_obj.has_next %}
+                                <li class="page-item">
+                                    <a class="page-link" href="?page={{ page_obj.next_page_number }}{% if search %}&search={{ search }}{% endif %}{% if status %}&status={{ status }}{% endif %}{% if currency %}&currency={{ currency }}{% endif %}">Next</a>
+                                </li>
+                                <li class="page-item">
+                                    <a class="page-link" href="?page={{ page_obj.paginator.num_pages }}{% if search %}&search={{ search }}{% endif %}{% if status %}&status={{ status }}{% endif %}{% if currency %}&currency={{ currency }}{% endif %}">Last</a>
+                                </li>
+                            {% endif %}
+                        </ul>
+                    </nav>
+                </div>
+                {% endif %}
+            {% else %}
+                <div class="text-center py-5" style="color: var(--gray-500);">
+                    <i class="bi bi-briefcase" style="font-size: 3rem; opacity: 0.3;"></i>
+                    <p class="mt-3 mb-0">No portfolios found</p>
+                    {% if search or status or currency %}
+                        <p class="text-muted">Try adjusting your filters</p>
+                    {% else %}
+                        {% if can_create %}
+                        <p class="text-muted mt-2">
+                            <a href="{% url 'portfolio:create' %}" class="btn btn-primary">
+                                <i class="bi bi-plus-circle"></i> Create your first portfolio
+                            </a>
+                        </p>
+                        {% else %}
+                        <p class="text-muted mt-2">No portfolios available</p>
+                        {% endif %}
+                    {% endif %}
+                </div>
+            {% endif %}
+        </div>
+    </div>
+
+
+    <!-- Info Alert -->
+    <div class="alert alert-info mt-4">
+        <i class="bi bi-info-circle"></i>
+        <strong>Four-Eyes Workflow:</strong>
+        <ul class="mb-0 mt-2">
+            <li><strong>MAKER Actions:</strong>
+                <ul>
+                    <li>Create portfolio → <span class="badge badge-secondary">INITIAL</span></li>
+                    <li>Edit portfolio → <span class="badge badge-info">MODIFIED</span></li>
+                    <li>Submit for validation → <span class="badge badge-warning">PENDING_VALIDATION</span></li>
+                    <li>Cancel portfolio → <span class="badge badge-dark">CANCELLED</span></li>
+                </ul>
+            </li>
+            <li><strong>CHECKER Actions:</strong>
+                <ul>
+                    <li>Validate → <span class="badge badge-primary">VALIDATED</span> (or <span class="badge badge-dark">CANCELLED</span> if rejected)</li>
+                    <li>Settle → <span class="badge badge-success">SETTLED</span> (portfolio becomes active)</li>
+                </ul>
+            </li>
+            <li><strong>Important:</strong> Makers cannot validate/settle their own portfolios (Four-Eyes principle)</li>
+        </ul>
+    </div>
+</div>
+{% endblock %}

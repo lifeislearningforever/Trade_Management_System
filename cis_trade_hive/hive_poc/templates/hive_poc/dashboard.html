@@ -1,0 +1,177 @@
+{% extends 'hive_poc/base.html' %}
+{% block title %}Dashboard{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col">
+        <h2>Hive POC Dashboard</h2>
+        <p class="text-muted">Proof of Concept: Hive Managed Tables with ORC File Format</p>
+    </div>
+</div>
+
+<div class="row mb-4">
+    <div class="col-md-3">
+        <div class="card text-white bg-primary">
+            <div class="card-body">
+                <h5 class="card-title">Portfolios</h5>
+                <h2>{{ portfolio_count }}</h2>
+                <small>{{ deleted_portfolios }} deleted</small>
+            </div>
+            <div class="card-footer">
+                <a href="{% url 'hive_poc:portfolio_list' %}" class="text-white">View All &rarr;</a>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-white bg-success">
+            <div class="card-body">
+                <h5 class="card-title">Trades</h5>
+                <h2>{{ trade_count }}</h2>
+                <small>{{ deleted_trades }} deleted</small>
+            </div>
+            <div class="card-footer">
+                <a href="{% url 'hive_poc:trade_list' %}" class="text-white">View All &rarr;</a>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-white bg-info">
+            <div class="card-body">
+                <h5 class="card-title">Storage</h5>
+                <h2>ORC</h2>
+                <small>SNAPPY compression</small>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-white bg-warning">
+            <div class="card-body">
+                <h5 class="card-title">Table Type</h5>
+                <h2>Managed</h2>
+                <small>ACID Transactions</small>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span>Recent Portfolios</span>
+                <a href="{% url 'hive_poc:portfolio_create' %}" class="btn btn-sm btn-primary">+ New</a>
+            </div>
+            <div class="card-body">
+                {% if portfolios %}
+                <table class="table table-sm table-hover">
+                    <thead>
+                        <tr>
+                            <th>Code</th>
+                            <th>Name</th>
+                            <th>Type</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for p in portfolios|slice:":5" %}
+                        <tr>
+                            <td><a href="{% url 'hive_poc:portfolio_edit' p.portfolio_id %}">{{ p.portfolio_code }}</a></td>
+                            <td>{{ p.portfolio_name }}</td>
+                            <td>{{ p.portfolio_type }}</td>
+                            <td>
+                                <span class="badge {% if p.status == 'ACTIVE' %}bg-success{% elif p.status == 'INACTIVE' %}bg-danger{% else %}bg-secondary{% endif %}">
+                                    {{ p.status }}
+                                </span>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}
+                <p class="text-muted">No portfolios found. <a href="{% url 'hive_poc:portfolio_create' %}">Create one</a>.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span>Recent Trades</span>
+                <a href="{% url 'hive_poc:trade_create' %}" class="btn btn-sm btn-success">+ New</a>
+            </div>
+            <div class="card-body">
+                {% if trades %}
+                <table class="table table-sm table-hover">
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Security</th>
+                            <th>Type</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for t in trades %}
+                        <tr>
+                            <td><a href="{% url 'hive_poc:trade_edit' t.trade_id %}">{{ t.trade_id }}</a></td>
+                            <td>{{ t.security_name|truncatechars:20 }}</td>
+                            <td>
+                                <span class="badge {% if t.trade_type == 'BUY' %}bg-success{% else %}bg-danger{% endif %}">
+                                    {{ t.trade_type }}
+                                </span>
+                            </td>
+                            <td>
+                                <span class="badge {% if t.status == 'SETTLED' %}bg-success{% elif t.status == 'CANCELLED' %}bg-danger{% elif t.status == 'EXECUTED' %}bg-info{% else %}bg-warning{% endif %}">
+                                    {{ t.status }}
+                                </span>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}
+                <p class="text-muted">No trades found. <a href="{% url 'hive_poc:trade_create' %}">Create one</a>.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mt-4">
+    <div class="col">
+        <div class="card">
+            <div class="card-header">POC Features</div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-4">
+                        <h6>Hive Managed Tables</h6>
+                        <ul class="small">
+                            <li>ORC file format</li>
+                            <li>SNAPPY compression</li>
+                            <li>ACID transactions</li>
+                        </ul>
+                    </div>
+                    <div class="col-md-4">
+                        <h6>CRUD Operations</h6>
+                        <ul class="small">
+                            <li>Create (INSERT INTO)</li>
+                            <li>Read (SELECT)</li>
+                            <li>Update (UPDATE)</li>
+                            <li>Delete (Soft delete)</li>
+                        </ul>
+                    </div>
+                    <div class="col-md-4">
+                        <h6>Soft Delete</h6>
+                        <ul class="small">
+                            <li>deleted_at timestamp</li>
+                            <li>Restore capability</li>
+                            <li>View deleted records</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

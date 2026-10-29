@@ -1,0 +1,326 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}{{ page_title }}{% endblock %}
+
+{% block breadcrumb %}
+    <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
+    <li class="breadcrumb-item">Configuration</li>
+    <li class="breadcrumb-item"><a href="{% url 'udf:list' %}">User Defined Fields</a></li>
+    <li class="breadcrumb-item active">{% if form_action == 'create' %}Create{% else %}Edit{% endif %}</li>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-4">
+    <!-- Header -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="d-flex justify-content-between align-items-center">
+                <div>
+                    <h1 class="h3 mb-1">{{ page_title }}</h1>
+                    <p class="text-muted mb-0">
+                        {% if form_action == 'create' %}
+                        Create a new user-defined field
+                        {% else %}
+                        Edit existing user-defined field
+                        {% endif %}
+                    </p>
+                </div>
+                <div>
+                    <a href="{% url 'udf:list' %}" class="btn btn-outline-secondary">
+                        <i class="bi bi-arrow-left me-1"></i> Back to List
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Form -->
+    <div class="row">
+        <div class="col-12 col-lg-8">
+            <div class="card shadow-sm border-0">
+                <div class="card-body">
+                    {% if error %}
+                    <div class="alert alert-danger alert-dismissible fade show" role="alert">
+                        <i class="bi bi-exclamation-triangle-fill me-2"></i>
+                        <strong>Error:</strong> {{ error }}
+                        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                    </div>
+                    {% endif %}
+
+                    <form method="post" action="">
+                        {% csrf_token %}
+
+                        <!-- Object Type (Dropdown 1 - Cascading) -->
+                        <div class="mb-4">
+                            <label for="object_type" class="form-label">
+                                Object Type <span class="text-danger">*</span>
+                            </label>
+                            <select class="form-select"
+                                    id="object_type"
+                                    name="object_type"
+                                    required
+                                    {% if form_action == 'edit' %}disabled{% endif %}>
+                                <option value="">-- Select Object Type --</option>
+                                {% for object_type in object_types %}
+                                <option value="{{ object_type }}"
+                                        {% if field_data.object_type == object_type %}selected{% endif %}>
+                                    {{ object_type }}
+                                </option>
+                                {% endfor %}
+                            </select>
+                            <div class="form-text">
+                                Module/Object this UDF belongs to. Select to filter available fields.
+                                {% if form_action == 'edit' %}
+                                <span class="text-warning"><i class="bi bi-lock-fill"></i> Object type cannot be changed after creation.</span>
+                                {% endif %}
+                            </div>
+                            {% if form_action == 'edit' %}
+                            <!-- Hidden field to submit disabled value -->
+                            <input type="hidden" name="object_type" value="{{ field_data.object_type }}">
+                            {% endif %}
+                        </div>
+
+                        <!-- Field Name (Dropdown 2 - Cascading, filtered by Object Type) -->
+                        <div class="mb-4">
+                            <label for="field_name" class="form-label">
+                                Field Name <span class="text-danger">*</span>
+                            </label>
+                            <select class="form-select"
+                                    id="field_name"
+                                    name="field_name"
+                                    required
+                                    {% if form_action == 'edit' %}disabled{% endif %}>
+                                <option value="">-- Select Object Type First --</option>
+                            </select>
+                            <div class="form-text">
+                                Select the field to add a value to (e.g., Portfolio Manager, Account Group).
+                                {% if form_action == 'edit' %}
+                                <span class="text-warning"><i class="bi bi-lock-fill"></i> Field name cannot be changed after creation.</span>
+                                {% endif %}
+                            </div>
+                            {% if form_action == 'edit' %}
+                            <!-- Hidden field to submit disabled value -->
+                            <input type="hidden" name="field_name" value="{{ field_data.field_name }}">
+                            {% endif %}
+                        </div>
+
+                        <!-- Field Value (The actual dropdown option value) -->
+                        <div class="mb-4">
+                            <label for="field_value" class="form-label">
+                                Value <span class="text-danger">*</span>
+                            </label>
+                            <input type="text"
+                                   class="form-control"
+                                   id="field_value"
+                                   name="field_value"
+                                   value="{{ field_data.field_value|default:'' }}"
+                                   placeholder="e.g., John Doe, Trading Desk A, Growth Fund"
+                                   required>
+                            <div class="form-text">
+                                The dropdown option value that users will select (e.g., "John Doe" for Portfolio Manager).
+                            </div>
+                        </div>
+
+                        {% if form_action == 'edit' %}
+                        <!-- Active Checkbox (only for edit) -->
+                        <div class="mb-4">
+                            <div class="form-check form-switch">
+                                <input class="form-check-input"
+                                       type="checkbox"
+                                       id="is_active"
+                                       name="is_active"
+                                       {% if field_data.is_active %}checked{% endif %}>
+                                <label class="form-check-label" for="is_active">
+                                    Active
+                                </label>
+                            </div>
+                            <div class="form-text">
+                                Inactive fields are hidden from users and cannot be used.
+                            </div>
+                        </div>
+                        {% endif %}
+
+                        <hr class="my-4">
+
+                        <!-- Action Buttons -->
+                        <div class="d-flex gap-2">
+                            <button type="submit" class="btn btn-primary">
+                                <i class="bi bi-check-circle me-1"></i>
+                                {% if form_action == 'create' %}Create Field{% else %}Save Changes{% endif %}
+                            </button>
+                            <a href="{% url 'udf:list' %}" class="btn btn-outline-secondary">
+                                <i class="bi bi-x-circle me-1"></i> Cancel
+                            </a>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <!-- Help Panel -->
+        <div class="col-12 col-lg-4 mt-4 mt-lg-0">
+            <div class="card shadow-sm border-0 bg-light">
+                <div class="card-body">
+                    <h6 class="card-title">
+                        <i class="bi bi-lightbulb text-warning me-2"></i>Tips
+                    </h6>
+
+                    <div class="mb-3">
+                        <strong>Object Type</strong>
+                        <ul class="small mb-0 ps-3">
+                            <li>The module this field belongs to (e.g., PORTFOLIO)</li>
+                            <li>Cannot be changed after creation</li>
+                        </ul>
+                    </div>
+
+                    <div class="mb-3">
+                        <strong>Field Name</strong>
+                        <ul class="small mb-0 ps-3">
+                            <li>The field definition (e.g., Portfolio Manager, Account Group)</li>
+                            <li>Admin creates field definitions first</li>
+                            <li>Cannot be changed after creation</li>
+                        </ul>
+                    </div>
+
+                    <div class="mb-3">
+                        <strong>Value</strong>
+                        <ul class="small mb-0 ps-3">
+                            <li>The dropdown option value users will see</li>
+                            <li>Examples: John Doe, Trading Desk A, Growth Fund</li>
+                            <li>Multiple values can be added per field</li>
+                        </ul>
+                    </div>
+
+                    <div>
+                        <strong>How it Works</strong>
+                        <p class="small mb-0">
+                            1. Admin creates field definitions (Object Type + Field Name)<br>
+                            2. Users add values for each field (the dropdown options)
+                        </p>
+                    </div>
+                </div>
+            </div>
+
+            {% if form_action == 'edit' %}
+            <div class="card shadow-sm border-0 mt-3">
+                <div class="card-body">
+                    <h6 class="card-title">
+                        <i class="bi bi-info-circle text-info me-2"></i>Audit Info
+                    </h6>
+                    <dl class="row small mb-0">
+                        <dt class="col-5 text-muted">Created By:</dt>
+                        <dd class="col-7">{{ field_data.created_by }}</dd>
+
+                        <dt class="col-5 text-muted">Created At:</dt>
+                        <dd class="col-7">{{ field_data.created_at }}</dd>
+
+                        <dt class="col-5 text-muted">Updated By:</dt>
+                        <dd class="col-7">{{ field_data.updated_by }}</dd>
+
+                        <dt class="col-5 text-muted">Updated At:</dt>
+                        <dd class="col-7">{{ field_data.updated_at }}</dd>
+                    </dl>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- JavaScript for Cascading Dropdowns -->
+<script>
+(function() {
+    'use strict';
+
+    // Get form elements
+    const objectTypeSelect = document.getElementById('object_type');
+    const fieldNameSelect = document.getElementById('field_name');
+
+    // Store pre-selected values (works for both create with URL params and edit mode)
+    const preSelectedObjectType = "{% if field_data %}{{ field_data.object_type|default:'' }}{% endif %}";
+    const preSelectedFieldName = "{% if field_data %}{{ field_data.field_name|default:'' }}{% endif %}";
+
+    /**
+     * Fetch and populate field names based on selected object type
+     */
+    function loadFieldNamesByObjectType(objectType, callback) {
+        if (!objectType) {
+            fieldNameSelect.innerHTML = '<option value="">-- Select Object Type First --</option>';
+            fieldNameSelect.disabled = true;
+            return;
+        }
+
+        // Show loading state
+        fieldNameSelect.innerHTML = '<option value="">Loading fields...</option>';
+        fieldNameSelect.disabled = true;
+
+        // Fetch fields from API
+        fetch(`/udf/api/fields/${objectType}/`)
+            .then(response => response.json())
+            .then(data => {
+                if (data.success && data.fields) {
+                    // Clear and enable dropdown
+                    fieldNameSelect.innerHTML = '<option value="">-- Select Field Name --</option>';
+
+                    if (data.fields.length === 0) {
+                        fieldNameSelect.innerHTML = '<option value="">-- No fields available for this object --</option>';
+                        fieldNameSelect.disabled = true;
+                    } else {
+                        // Populate options
+                        data.fields.forEach(field => {
+                            const option = document.createElement('option');
+                            option.value = field.field_name;
+                            option.textContent = `${field.field_name} - ${field.field_value}`;
+                            fieldNameSelect.appendChild(option);
+                        });
+
+                        fieldNameSelect.disabled = false;
+
+                        // Restore pre-selected value if in edit mode
+                        if (preSelectedFieldName && callback) {
+                            fieldNameSelect.value = preSelectedFieldName;
+                        }
+
+                        if (callback) callback();
+                    }
+                } else {
+                    fieldNameSelect.innerHTML = '<option value="">-- Error loading fields --</option>';
+                    fieldNameSelect.disabled = true;
+                    console.error('Error loading fields:', data.error);
+                }
+            })
+            .catch(error => {
+                fieldNameSelect.innerHTML = '<option value="">-- Error loading fields --</option>';
+                fieldNameSelect.disabled = true;
+                console.error('Error fetching fields:', error);
+            });
+    }
+
+    /**
+     * Event listener: Object Type change
+     */
+    {% if form_action != 'edit' %}
+    objectTypeSelect.addEventListener('change', function() {
+        const selectedObjectType = this.value;
+        loadFieldNamesByObjectType(selectedObjectType);
+    });
+    {% endif %}
+
+    /**
+     * Initialize on page load
+     */
+    document.addEventListener('DOMContentLoaded', function() {
+        {% if field_data.object_type %}
+        // Load fields for pre-selected object type (works for both create and edit mode)
+        loadFieldNamesByObjectType(preSelectedObjectType, function() {
+            // Callback after fields are loaded - select the pre-selected field
+            if (preSelectedFieldName) {
+                fieldNameSelect.value = preSelectedFieldName;
+            }
+        });
+        {% endif %}
+    });
+})();
+</script>
+{% endblock %}

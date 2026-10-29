@@ -1,0 +1,2 @@
+name,description,currency,manager,portfolio_client,cash_balance_list,cash_balance,status,cost_centre_code,corp_code,account_group,portfolio_group,report_group,entity_group,revaluation_status,created_at,updated_at,source_name,branch_code,validation_status
+Portfolio_Prakash,Portfolio,SGD,GLOBAL CAPITAL,UOB LABUAN,UOB LABUAN,MYR CLEARING,Active,0000,0000,UOB ASSOC GROU,UOB-GSAM,AIIF CP,UOB BRA,REVALUED,2025-12-18 17:18:57.781657000,NULL,cis,NULL,NULL

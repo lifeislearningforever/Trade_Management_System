@@ -1,0 +1,93 @@
+{% load static %}
+{% load core_filters %}
+<!-- Right Side -->
+<div class="navbar-right">
+    <!-- Search -->
+    <form action="{% url 'global_search' %}" method="get" class="navbar-search d-none d-lg-block">
+        <i class="bi bi-search"></i>
+        <input type="text" placeholder="Search portfolios, trades..." id="global-search" name="q">
+    </form>
+
+    <!-- Font Size Control -->
+    <div class="font-size-control d-none d-md-flex" id="font-size-control" title="Adjust display size">
+        <span class="font-size-control-label">Display:</span>
+        <button type="button" class="font-size-btn" data-scale="small" title="Small (85%)">S</button>
+        <button type="button" class="font-size-btn active" data-scale="default" title="Default (100%)">M</button>
+        <button type="button" class="font-size-btn" data-scale="large" title="Large (115%)">L</button>
+        <button type="button" class="font-size-btn" data-scale="xlarge" title="Extra Large (130%)">XL</button>
+        <span class="font-size-indicator" id="font-size-indicator">100%</span>
+    </div>
+
+    <!-- System Date Display (from GMP file) -->
+    <div class="system-date-display d-none d-md-flex" title="System Date: {{ system_date_display }} ({{ system_date_source }})">
+        <i class="bi bi-calendar-date"></i>
+        <span class="system-date-value">{{ system_date_display|default:"Loading..." }}</span>
+    </div>
+
+    <!-- Icons -->
+    <div class="navbar-icons">
+        <!-- Notifications -->
+        <div class="notification-wrapper" id="notification-wrapper">
+            <button class="navbar-icon" id="notifications-btn" title="Notifications" aria-haspopup="true" aria-expanded="false">
+                <i class="bi bi-bell"></i>
+                <span class="notification-badge" id="notification-badge" style="display:none;">0</span>
+            </button>
+            <!-- Notification Panel Dropdown -->
+            <div class="notification-panel" id="notification-panel" style="display:none;" role="dialog" aria-label="Notifications">
+                <div class="notification-panel-header">
+                    <span class="notification-panel-title">
+                        <i class="bi bi-bell-fill me-1"></i>Notifications
+                    </span>
+                    <span class="notification-conn-status" id="notification-conn-status" title="WebSocket status">
+                        <i class="bi bi-circle-fill text-secondary" style="font-size:0.55rem;"></i>
+                    </span>
+                    <div class="notification-panel-actions">
+                        <button class="notif-action-btn" id="notif-mark-all-read" title="Mark all as read">
+                            <i class="bi bi-check2-all"></i>
+                        </button>
+                        <button class="notif-action-btn" id="notif-clear-all" title="Clear all">
+                            <i class="bi bi-trash3"></i>
+                        </button>
+                    </div>
+                </div>
+                <ul class="notification-list" id="notification-list" role="list">
+                    <li class="notification-empty" id="notification-empty">
+                        <i class="bi bi-bell-slash d-block mb-1" style="font-size:1.4rem;opacity:0.35;"></i>
+                        No notifications
+                    </li>
+                </ul>
+            </div>
+        </div>
+
+        <!-- Help -->
+        <a href="/static/docs/index.html" target="_blank" class="navbar-icon" title="Help & Documentation">
+            <i class="bi bi-question-circle"></i>
+        </a>
+    </div>
+
+    <!-- User Menu -->
+    <div class="user-menu" id="user-menu">
+        <div class="user-avatar">
+            {% with user_name=request.session.user_name|default:"U" %}
+                {{ user_name|slice:":1"|upper }}{% if user_name|wordcount > 1 %}{{ user_name|split:" "|last|slice:":1"|upper }}{% endif %}
+            {% endwith %}
+        </div>
+        <div class="user-info d-none d-md-block">
+            <div class="user-name">{{ request.session.user_name|default:"User" }}</div>
+            <div class="user-role">{{ request.session.user_group_name|default:"User" }}</div>
+        </div>
+        <i class="bi bi-chevron-down d-none d-md-block"></i>
+    </div>
+</div>
+
+<!-- User Dropdown Menu (Hidden by default) -->
+<div class="dropdown-menu dropdown-menu-end" id="user-dropdown" style="display: none;">
+    <div class="dropdown-header">
+        <strong>{{ request.session.user_name|default:"User" }}</strong>
+        <small class="d-block text-muted">{{ request.session.user_email|default:"" }}</small>
+    </div>
+    <div class="dropdown-divider"></div>
+    <a class="dropdown-item" href="{% url 'logout' %}">
+        <i class="bi bi-box-arrow-right"></i> Logout
+    </a>
+</div>

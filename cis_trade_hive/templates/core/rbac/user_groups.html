@@ -1,0 +1,80 @@
+{% extends 'base.html' %}
+
+{% block title %}User Group Assignment - RBAC Admin{% endblock %}
+
+{% block breadcrumb %}
+    <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
+    <li class="breadcrumb-item"><a href="{% url 'core:rbac_dashboard' %}">RBAC Admin</a></li>
+    <li class="breadcrumb-item"><a href="{% url 'core:rbac_user_list' %}">Users</a></li>
+    <li class="breadcrumb-item active">Group Assignment</li>
+{% endblock %}
+
+{% block content %}
+<div class="content-header">
+    <h1 class="content-title">
+        <i class="bi bi-collection text-success"></i>
+        Group Assignment &mdash; <strong>{{ user.login }}</strong>
+    </h1>
+    <p class="content-subtitle">{{ user.name|default:user.login }} &bull; {{ user.email|default:"" }}</p>
+</div>
+
+{% if messages %}
+<div class="mb-3">
+    {% for msg in messages %}
+    <div class="alert alert-{% if msg.tags == 'error' %}danger{% else %}{{ msg.tags }}{% endif %} alert-dismissible fade show py-2">
+        {{ msg }} <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
+<div class="card" style="max-width: 700px;">
+    <div class="card-header">
+        <h6 class="mb-0">Select groups for this user (multi-select)</h6>
+    </div>
+    <div class="card-body">
+        <form method="post">
+            {% csrf_token %}
+
+            <div class="mb-3">
+                <label class="form-label">Entity</label>
+                <select name="entity" class="form-select form-select-sm" style="max-width: 200px;">
+                    <option value="UOBS" {% if user.default_entity == 'UOBS' %}selected{% endif %}>UOBS</option>
+                    <option value="UOBM" {% if user.default_entity == 'UOBM' %}selected{% endif %}>UOBM</option>
+                    <option value="UOBT" {% if user.default_entity == 'UOBT' %}selected{% endif %}>UOBT</option>
+                </select>
+                <div class="form-text">Existing mappings for this entity will be replaced.</div>
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label">Groups</label>
+                {% if all_groups %}
+                <div class="border rounded p-3" style="max-height: 400px; overflow-y: auto;">
+                    {% for g in all_groups %}
+                    <div class="form-check mb-2">
+                        <input class="form-check-input" type="checkbox" name="group_names"
+                               value="{{ g.group_name }}" id="grp_{{ forloop.counter }}"
+                               {% if g.group_name in current_group_names %}checked{% endif %}>
+                        <label class="form-check-label" for="grp_{{ forloop.counter }}">
+                            <strong>{{ g.group_name }}</strong>
+                            {% if g.description %}<span class="text-muted small ms-2">{{ g.description }}</span>{% endif %}
+                            <span class="badge bg-light text-dark ms-1">{{ g.entity }}</span>
+                        </label>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <div class="text-muted small">No groups defined yet. <a href="{% url 'core:rbac_group_create' %}">Create a group</a> first.</div>
+                {% endif %}
+            </div>
+
+            <div class="d-flex gap-2">
+                <button type="submit" class="btn btn-success">
+                    <i class="bi bi-check-lg"></i> Save Group Assignment
+                </button>
+                <a href="{% url 'core:rbac_user_list' %}" class="btn btn-outline-secondary">Cancel</a>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

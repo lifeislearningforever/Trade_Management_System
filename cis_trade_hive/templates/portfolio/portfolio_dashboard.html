@@ -1,0 +1,237 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Portfolio Dashboard - CisTrade{% endblock %}
+
+{% block breadcrumb %}
+    <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
+    <li class="breadcrumb-item"><a href="{% url 'portfolio:list' %}">Portfolios</a></li>
+    <li class="breadcrumb-item active">Dashboard</li>
+{% endblock %}
+
+{% block content %}
+<div class="portfolio-dashboard-container">
+    <!-- Page Header -->
+    <div class="content-header">
+        <h1 class="content-title">
+            <i class="bi bi-graph-up text-primary"></i> Portfolio Dashboard
+        </h1>
+        <p class="content-subtitle">Overview of portfolios and workflow statistics</p>
+    </div>
+
+    <!-- Quick Actions -->
+    <div class="mb-4">
+        <a href="{% url 'portfolio:create' %}" class="btn btn-primary">
+            <i class="bi bi-plus-circle"></i> Create New Portfolio
+        </a>
+        <a href="{% url 'portfolio:list' %}" class="btn btn-outline-primary">
+            <i class="bi bi-list"></i> View All Portfolios
+        </a>
+        <a href="{% url 'portfolio:pending_validation' %}" class="btn btn-warning">
+            <i class="bi bi-clock-history"></i> Pending Validation
+        </a>
+    </div>
+
+    <!-- Overview Statistics -->
+    <div class="row mb-4">
+        <div class="col-md-3">
+            <div class="card text-white bg-primary h-100">
+                <div class="card-body">
+                    <div class="d-flex align-items-center">
+                        <div class="flex-grow-1">
+                            <h6 class="card-title text-white">Total Portfolios</h6>
+                            <h2 class="mb-0">{{ stats.total_portfolios|default:0 }}</h2>
+                        </div>
+                        <div class="flex-shrink-0">
+                            <i class="bi bi-briefcase" style="font-size: 3rem; opacity: 0.3;"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-3">
+            <div class="card text-white bg-success h-100">
+                <div class="card-body">
+                    <div class="d-flex align-items-center">
+                        <div class="flex-grow-1">
+                            <h6 class="card-title text-white">Active</h6>
+                            <h2 class="mb-0">{{ stats.active_portfolios|default:0 }}</h2>
+                        </div>
+                        <div class="flex-shrink-0">
+                            <i class="bi bi-check-circle" style="font-size: 3rem; opacity: 0.3;"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-3">
+            <div class="card text-white bg-warning h-100">
+                <div class="card-body">
+                    <div class="d-flex align-items-center">
+                        <div class="flex-grow-1">
+                            <h6 class="card-title text-white">Pending Validation</h6>
+                            <h2 class="mb-0">{{ stats.pending_validation|default:0 }}</h2>
+                        </div>
+                        <div class="flex-shrink-0">
+                            <i class="bi bi-clock-history" style="font-size: 3rem; opacity: 0.3;"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-3">
+            <div class="card text-white bg-info h-100">
+                <div class="card-body">
+                    <div class="d-flex align-items-center">
+                        <div class="flex-grow-1">
+                            <h6 class="card-title text-white">Validated</h6>
+                            <h2 class="mb-0">{{ stats.validated|default:0 }}</h2>
+                        </div>
+                        <div class="flex-shrink-0">
+                            <i class="bi bi-patch-check" style="font-size: 3rem; opacity: 0.3;"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Status Breakdown and Currency Breakdown -->
+    <div class="row mb-4">
+        <div class="col-md-6">
+            <div class="card h-100">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">
+                        <i class="bi bi-diagram-3"></i> Workflow Status Distribution
+                    </h5>
+                </div>
+                <div class="card-body">
+                    {% if stats.status_breakdown %}
+                        <table class="table table-sm table-hover">
+                            <thead>
+                                <tr>
+                                    <th>Status</th>
+                                    <th class="text-end">Count</th>
+                                    <th style="width: 50%;">Distribution</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for item in stats.status_breakdown %}
+                                <tr>
+                                    <td>
+                                        {% if item.status == 'INITIAL' %}
+                                            <span class="badge badge-secondary">{{ item.status }}</span>
+                                        {% elif item.status == 'MODIFIED' %}
+                                            <span class="badge badge-info">{{ item.status }}</span>
+                                        {% elif item.status == 'PENDING_VALIDATION' %}
+                                            <span class="badge badge-warning">{{ item.status }}</span>
+                                        {% elif item.status == 'VALIDATED' %}
+                                            <span class="badge badge-primary">{{ item.status }}</span>
+                                        {% elif item.status == 'SETTLED' %}
+                                            <span class="badge badge-success">{{ item.status }}</span>
+                                        {% elif item.status == 'CANCELLED' %}
+                                            <span class="badge badge-dark">{{ item.status }}</span>
+                                        {% else %}
+                                            <span class="badge badge-secondary">{{ item.status|default:"N/A" }}</span>
+                                        {% endif %}
+                                    </td>
+                                    <td class="text-end"><strong>{{ item.count }}</strong></td>
+                                    <td>
+                                        <div class="progress" style="height: 20px;">
+                                            <div class="progress-bar {% if item.status == 'SETTLED' %}bg-success{% elif item.status == 'VALIDATED' %}bg-primary{% elif item.status == 'PENDING_VALIDATION' %}bg-warning{% elif item.status == 'CANCELLED' %}bg-dark{% else %}bg-secondary{% endif %}" role="progressbar"
+                                                 style="width: {% widthratio item.count stats.total_portfolios 100 %}%"
+                                                 aria-valuenow="{{ item.count }}" aria-valuemin="0" aria-valuemax="{{ stats.total_portfolios }}">
+                                                {% widthratio item.count stats.total_portfolios 100 %}%
+                                            </div>
+                                        </div>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    {% else %}
+                        <p class="text-muted text-center">No data available</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-6">
+            <div class="card h-100">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">
+                        <i class="bi bi-currency-exchange"></i> All Portfolios by Currency
+                    </h5>
+                </div>
+                <div class="card-body" style="max-height: 400px; overflow-y: auto;">
+                    {% if stats.all_currency_breakdown %}
+                        <table class="table table-sm table-hover">
+                            <thead>
+                                <tr>
+                                    <th>Currency</th>
+                                    <th class="text-end">Count</th>
+                                    <th style="width: 50%;">Distribution</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for item in stats.all_currency_breakdown %}
+                                <tr>
+                                    <td>
+                                        <span class="badge badge-info">{{ item.currency|default:"N/A" }}</span>
+                                    </td>
+                                    <td class="text-end"><strong>{{ item.count }}</strong></td>
+                                    <td>
+                                        <div class="progress" style="height: 20px;">
+                                            <div class="progress-bar bg-info" role="progressbar"
+                                                 style="width: {% widthratio item.count stats.total_portfolios 100 %}%"
+                                                 aria-valuenow="{{ item.count }}" aria-valuemin="0" aria-valuemax="{{ stats.total_portfolios }}">
+                                                {% widthratio item.count stats.total_portfolios 100 %}%
+                                            </div>
+                                        </div>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    {% else %}
+                        <p class="text-muted text-center">No data available</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Info Alert -->
+    <div class="alert alert-info">
+        <i class="bi bi-info-circle"></i>
+        <strong>Four-Eyes Workflow:</strong>
+        <ul class="mb-0 mt-2">
+            <li><strong>MAKER Actions:</strong>
+                <ul>
+                    <li>Create portfolio &rarr; <span class="badge badge-secondary">INITIAL</span></li>
+                    <li>Edit portfolio &rarr; <span class="badge badge-info">MODIFIED</span></li>
+                    <li>Submit for validation &rarr; <span class="badge badge-warning">PENDING_VALIDATION</span></li>
+                    <li>Cancel portfolio &rarr; <span class="badge badge-dark">CANCELLED</span></li>
+                </ul>
+            </li>
+            <li><strong>CHECKER Actions:</strong>
+                <ul>
+                    <li>Validate &rarr; <span class="badge badge-primary">VALIDATED</span></li>
+                    <li>Settle &rarr; <span class="badge badge-success">SETTLED</span> (portfolio becomes active)</li>
+                </ul>
+            </li>
+            <li><strong>Important:</strong> Makers cannot validate/settle their own portfolios (Four-Eyes principle)</li>
+        </ul>
+    </div>
+
+    <!-- Back to List -->
+    <div class="mt-4">
+        <a href="{% url 'portfolio:list' %}" class="btn btn-outline-secondary">
+            <i class="bi bi-arrow-left"></i> Back to Portfolio List
+        </a>
+    </div>
+</div>
+{% endblock %}

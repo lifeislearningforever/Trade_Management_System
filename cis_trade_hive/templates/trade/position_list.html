@@ -1,0 +1,1048 @@
+{% extends 'base.html' %}
+{% load static humanize %}
+
+{% block title %}Positions - CisTrade{% endblock %}
+
+{% block breadcrumb %}
+    <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
+    <li class="breadcrumb-item"><a href="{% url 'trade:list' %}">Trades</a></li>
+    <li class="breadcrumb-item active">Positions</li>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+/* ── KPI strip ──────────────────────────────────────────────────────────── */
+.pos-kpi-strip {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: .75rem;
+    margin-bottom: 1rem;
+}
+.pos-kpi-card {
+    background: #fff;
+    border: 1px solid var(--gray-200, #e5e7eb);
+    border-radius: 10px;
+    padding: .85rem 1rem .8rem;
+    box-shadow: 0 1px 3px rgba(0,0,0,.06);
+    display: flex; flex-direction: column; gap: .25rem;
+    position: relative; overflow: hidden;
+    transition: box-shadow 140ms ease, transform 140ms ease;
+}
+.pos-kpi-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,.1); transform: translateY(-1px); }
+.pos-kpi-card::after {
+    content: ''; position: absolute; top: 0; left: 0; right: 0;
+    height: 3px; border-radius: 10px 10px 0 0;
+}
+.pos-kpi-mv::after   { background: linear-gradient(90deg,#2563eb,#60a5fa); }
+.pos-kpi-cost::after { background: linear-gradient(90deg,#7c3aed,#a78bfa); }
+.pos-kpi-upnl::after { background: linear-gradient(90deg,#059669,#34d399); }
+.pos-kpi-rpnl::after { background: linear-gradient(90deg,#0891b2,#67e8f9); }
+.pos-kpi-cnt::after  { background: linear-gradient(90deg,#d97706,#fcd34d); }
+.pos-kpi-label {
+    font-size: .68rem; font-weight: 600; text-transform: uppercase;
+    letter-spacing: .05em; color: var(--gray-500, #6b7280);
+}
+.pos-kpi-value {
+    font-family: var(--font-mono, monospace);
+    font-size: 1.25rem; font-weight: 700;
+    letter-spacing: -.02em; line-height: 1.1;
+    color: var(--gray-800, #1f2937);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.pos-kpi-mv   .pos-kpi-value { color: #1d4ed8; }
+.pos-kpi-cost .pos-kpi-value { color: #5b21b6; }
+.pos-kpi-upnl .pos-kpi-value { color: #047857; }
+.pos-kpi-rpnl .pos-kpi-value { color: #0e7490; }
+.pos-kpi-cnt  .pos-kpi-value { color: #b45309; }
+.pos-kpi-sub {
+    font-size: .72rem; color: var(--gray-400, #9ca3af); margin-top: .05rem;
+}
+.pos-kpi-icon {
+    position: absolute; right: .75rem; bottom: .65rem;
+    font-size: 1.6rem; opacity: .07;
+}
+@media(max-width:900px){ .pos-kpi-strip { grid-template-columns: repeat(3,1fr); } }
+@media(max-width:540px){ .pos-kpi-strip { grid-template-columns: repeat(2,1fr); } }
+
+/* ── Section header ─────────────────────────────────────────────────────── */
+.pos-section-hdr {
+    display: flex; align-items: center; justify-content: space-between;
+    flex-wrap: wrap; gap: .75rem; margin-bottom: .65rem;
+}
+.pos-section-title { font-size: 1.05rem; font-weight: 700; color: var(--gray-800,#1f2937); }
+.pos-section-sub   { font-size: .8rem; color: var(--gray-500,#6b7280); margin-top: .1rem; }
+.pos-section-actions { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+
+/* ── Filter bar ─────────────────────────────────────────────────────────── */
+.pos-filter-bar {
+    background: #fff;
+    border: 1px solid var(--gray-200,#e5e7eb);
+    border-radius: 10px;
+    padding: .55rem .9rem;
+    display: flex; align-items: center; gap: .5rem; flex-wrap: wrap;
+    box-shadow: 0 1px 3px rgba(0,0,0,.06);
+    margin-bottom: .85rem;
+}
+.pos-filter-group  { display: flex; align-items: center; gap: .3rem; }
+.pos-filter-label  {
+    font-size: .69rem; font-weight: 600; text-transform: uppercase;
+    letter-spacing: .05em; color: var(--gray-500,#6b7280); white-space: nowrap;
+}
+.pos-filter-control {
+    height: 30px; padding: 0 .5rem;
+    border: 1px solid var(--gray-300,#d1d5db);
+    border-radius: 6px; font-size: .8rem;
+    color: var(--gray-700,#374151);
+    background: #fff; cursor: pointer;
+    transition: border-color 140ms ease; outline: none;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.pos-filter-control:focus {
+    border-color: #3b82f6;
+    box-shadow: 0 0 0 3px rgba(59,130,246,.12);
+}
+.pos-filter-btn {
+    display: inline-flex; align-items: center; gap: .3rem;
+    min-width: 90px; max-width: 150px;
+}
+.pos-filter-btn .pfb-label {
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    flex: 1; min-width: 0;
+}
+.pos-filter-divider {
+    width: 1px; height: 20px;
+    background: var(--gray-200,#e5e7eb);
+    margin: 0 .15rem; flex-shrink: 0;
+}
+.pos-filter-dropdown .dropdown-menu { z-index: 1055; min-width: 150px; }
+
+/* ── Active filter chips ────────────────────────────────────────────────── */
+.pos-active-filters {
+    display: flex; flex-wrap: wrap; gap: .35rem;
+    align-items: center; margin-bottom: .65rem;
+}
+.pos-chip {
+    display: inline-flex; align-items: center; gap: .25rem;
+    background: #eff6ff; border: 1px solid #bfdbfe;
+    border-radius: 20px; padding: .2rem .55rem .2rem .45rem;
+    font-size: .72rem; font-weight: 600; color: #1d4ed8;
+    white-space: nowrap;
+}
+.pos-chip .chip-x {
+    cursor: pointer; opacity: .5; font-size: .65rem;
+    margin-left: .1rem; line-height: 1;
+}
+.pos-chip .chip-x:hover { opacity: 1; }
+.pos-chip-label { font-size: .65rem; color: var(--gray-500,#6b7280); font-weight: 400; }
+
+/* ── Table ──────────────────────────────────────────────────────────────── */
+.pos-table th {
+    font-size: .69rem; text-transform: uppercase; letter-spacing: .04em;
+    color: #6b7280; white-space: nowrap; padding: 6px 8px; font-weight: 600;
+}
+.pos-table td { font-size: .81rem; padding: 5px 8px; vertical-align: middle; }
+.pos-table tbody tr:hover { background: #f0f4ff !important; }
+.num { font-variant-numeric: tabular-nums; }
+
+/* Sort */
+.sort-th { cursor: pointer; user-select: none; }
+.sort-th:hover { background: #e2e8f0 !important; }
+.sort-th .sort-icon { font-size: .6rem; margin-left: 3px; opacity: .4; }
+.sort-th.sorted-asc  .sort-icon::before { content: "▲"; opacity: 1; }
+.sort-th.sorted-desc .sort-icon::before { content: "▼"; opacity: 1; }
+.sort-th:not(.sorted-asc):not(.sorted-desc) .sort-icon::before { content: "⇅"; }
+</style>
+{% endblock %}
+
+{% block content %}
+
+<!-- ── KPI Strip ─────────────────────────────────────────────────────────────── -->
+<div class="pos-kpi-strip">
+    <div class="pos-kpi-card pos-kpi-cnt">
+        <div class="pos-kpi-label">Positions</div>
+        <div class="pos-kpi-value">{{ total|default:"0" }}</div>
+        <div class="pos-kpi-sub">matching filters</div>
+        <i class="bi bi-list-ul pos-kpi-icon"></i>
+    </div>
+    <div class="pos-kpi-card pos-kpi-mv">
+        <div class="pos-kpi-label">Mkt Value FC</div>
+        <div class="pos-kpi-value" title="{{ stats.total_market_value_fc }}">
+            {{ stats.total_market_value_fc|default:0|floatformat:0|intcomma }}
+        </div>
+        <div class="pos-kpi-sub">foreign currency</div>
+        <i class="bi bi-graph-up pos-kpi-icon"></i>
+    </div>
+    <div class="pos-kpi-card pos-kpi-cost">
+        <div class="pos-kpi-label">Cost FC</div>
+        <div class="pos-kpi-value" title="{{ stats.total_cost_fc }}">
+            {{ stats.total_cost_fc|default:0|floatformat:0|intcomma }}
+        </div>
+        <div class="pos-kpi-sub">total cost basis</div>
+        <i class="bi bi-currency-exchange pos-kpi-icon"></i>
+    </div>
+    <div class="pos-kpi-card pos-kpi-upnl">
+        <div class="pos-kpi-label">Unrealised PnL FC</div>
+        <div class="pos-kpi-value {% if stats.total_unrealized_pnl_fc and stats.total_unrealized_pnl_fc < 0 %}text-danger{% endif %}"
+             title="{{ stats.total_unrealized_pnl_fc }}">
+            {{ stats.total_unrealized_pnl_fc|default:0|floatformat:0|intcomma }}
+        </div>
+        <div class="pos-kpi-sub">open positions</div>
+        <i class="bi bi-arrow-up-right pos-kpi-icon"></i>
+    </div>
+    <div class="pos-kpi-card pos-kpi-rpnl">
+        <div class="pos-kpi-label">Realised PnL FC</div>
+        <div class="pos-kpi-value {% if stats.total_realized_pnl_fc and stats.total_realized_pnl_fc < 0 %}text-danger{% endif %}"
+             title="{{ stats.total_realized_pnl_fc }}">
+            {{ stats.total_realized_pnl_fc|default:0|floatformat:0|intcomma }}
+        </div>
+        <div class="pos-kpi-sub">closed positions</div>
+        <i class="bi bi-check2-circle pos-kpi-icon"></i>
+    </div>
+</div>
+
+<!-- ── Section header ────────────────────────────────────────────────────────── -->
+<div class="pos-section-hdr">
+    <div>
+        <div class="pos-section-title"><i class="bi bi-pie-chart text-primary me-1"></i>Position Viewer</div>
+        <div class="pos-section-sub">Read-only view of <code>cis_position</code> — <strong>{{ total }}</strong> record{{ total|pluralize }} found</div>
+    </div>
+    <div class="pos-section-actions">
+        <a href="?{{ base_qs }}&export=csv" class="btn btn-sm btn-outline-success">
+            <i class="bi bi-download"></i> Export CSV
+        </a>
+    </div>
+</div>
+
+<!-- ── Filter bar ─────────────────────────────────────────────────────────────── -->
+<form method="get" id="positionFilterForm">
+    {% if sort_by %}<input type="hidden" name="sort_by" value="{{ sort_by }}">{% endif %}
+    <input type="hidden" name="sort_dir" value="{{ sort_dir }}">
+
+    <div class="pos-filter-bar">
+
+        <!-- Portfolio -->
+        <div class="pos-filter-group">
+            <span class="pos-filter-label">Portfolio</span>
+            <div id="selectedPortfoliosInputs">
+                {% for p in selected_portfolios %}<input type="hidden" name="portfolios" value="{{ p }}">{% endfor %}
+            </div>
+            <button type="button"
+                    class="pos-filter-control pos-filter-btn"
+                    data-bs-toggle="modal" data-bs-target="#portfolioModal">
+                <span id="selectedPortfoliosLabel" class="pfb-label">
+                    {% if selected_portfolios %}{{ selected_portfolios|length }} selected{% else %}All{% endif %}
+                </span>
+                <i class="bi bi-chevron-down" style="font-size:.6rem;opacity:.5;flex-shrink:0;"></i>
+            </button>
+        </div>
+
+        <div class="pos-filter-divider"></div>
+
+        <!-- Security -->
+        <div class="pos-filter-group">
+            <span class="pos-filter-label">Security</span>
+            <div id="selectedSecuritiesInputs">
+                {% for s in selected_securities %}<input type="hidden" name="securities" value="{{ s }}">{% endfor %}
+            </div>
+            <button type="button"
+                    class="pos-filter-control pos-filter-btn"
+                    data-bs-toggle="modal" data-bs-target="#securityModal">
+                <span id="selectedSecuritiesLabel" class="pfb-label">
+                    {% if selected_securities %}{{ selected_securities|length }} selected{% else %}All{% endif %}
+                </span>
+                <i class="bi bi-chevron-down" style="font-size:.6rem;opacity:.5;flex-shrink:0;"></i>
+            </button>
+        </div>
+
+        <div class="pos-filter-divider"></div>
+
+        <!-- Src System -->
+        <div class="pos-filter-group pos-filter-dropdown">
+            <span class="pos-filter-label">Src</span>
+            <div id="srcSystemInputs">
+                {% for s in selected_src_systems %}<input type="hidden" name="src_system" value="{{ s }}">{% endfor %}
+            </div>
+            <div class="dropdown">
+                <button type="button"
+                        class="pos-filter-control pos-filter-btn"
+                        data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false">
+                    <span id="srcSystemLabel" class="pfb-label">
+                        {% if selected_src_systems %}{{ selected_src_systems|length }} selected{% else %}All{% endif %}
+                    </span>
+                    <i class="bi bi-chevron-down" style="font-size:.6rem;opacity:.5;flex-shrink:0;"></i>
+                </button>
+                <ul class="dropdown-menu p-2" style="min-width:140px;z-index:1055;">
+                    {% for s in src_systems %}
+                    <li>
+                        <label class="d-flex align-items-center gap-2 px-2 py-1 rounded"
+                               style="cursor:pointer;user-select:none;"
+                               onmouseover="this.style.background='#f8f9fa'"
+                               onmouseout="this.style.background=''">
+                            <input type="checkbox" class="form-check-input src-system-cb"
+                                   value="{{ s }}" {% if s in selected_src_systems %}checked{% endif %}
+                                   onchange="updateSrcSystem()">
+                            <span class="small">{{ s }}</span>
+                        </label>
+                    </li>
+                    {% endfor %}
+                    <li><hr class="dropdown-divider my-1"></li>
+                    <li class="px-2"><button type="button" class="btn btn-link btn-sm p-0 text-secondary" onclick="clearSrcSystems()">Clear</button></li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="pos-filter-divider"></div>
+
+        <!-- Position Basis -->
+        <div class="pos-filter-group">
+            <span class="pos-filter-label">Basis</span>
+            <select name="position_basis" class="pos-filter-control" style="min-width:90px;">
+                <option value="">All</option>
+                {% for b in position_basis_choices %}
+                    <option value="{{ b }}" {% if f_position_basis == b %}selected{% endif %}>{{ b }}</option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <div class="pos-filter-divider"></div>
+
+        <!-- Position Type -->
+        <div class="pos-filter-group pos-filter-dropdown">
+            <span class="pos-filter-label">Type</span>
+            <div id="posTypeInputs">
+                {% for t in selected_pos_types %}<input type="hidden" name="position_type" value="{{ t }}">{% endfor %}
+            </div>
+            <input type="hidden" id="posTypeCleared" name="position_type_cleared" value="0">
+            <div class="dropdown">
+                <button type="button"
+                        class="pos-filter-control pos-filter-btn"
+                        data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false">
+                    <span id="posTypeLabel" class="pfb-label">
+                        {% if selected_pos_types %}{{ selected_pos_types|length }} selected{% else %}All{% endif %}
+                    </span>
+                    <i class="bi bi-chevron-down" style="font-size:.6rem;opacity:.5;flex-shrink:0;"></i>
+                </button>
+                <ul class="dropdown-menu p-2" style="min-width:130px;z-index:1055;">
+                    {% for t in position_type_choices %}
+                    <li>
+                        <label class="d-flex align-items-center gap-2 px-2 py-1 rounded"
+                               style="cursor:pointer;user-select:none;"
+                               onmouseover="this.style.background='#f8f9fa'"
+                               onmouseout="this.style.background=''">
+                            <input type="checkbox" class="form-check-input pos-type-cb"
+                                   value="{{ t }}" {% if t in selected_pos_types %}checked{% endif %}
+                                   onchange="updatePosType()">
+                            <span>
+                                {% if t == 'INT' %}<span class="badge bg-primary">INT</span>
+                                {% elif t == 'EOD' %}<span class="badge bg-success">EOD</span>
+                                {% elif t == 'SOD' %}<span class="badge bg-warning text-dark">SOD</span>
+                                {% elif t == 'CORR' %}<span class="badge bg-info text-dark">CORR</span>
+                                {% else %}{{ t }}{% endif %}
+                            </span>
+                        </label>
+                    </li>
+                    {% endfor %}
+                    <li><hr class="dropdown-divider my-1"></li>
+                    <li class="px-2"><button type="button" class="btn btn-link btn-sm p-0 text-secondary" onclick="clearPosTypes()">Clear</button></li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="pos-filter-divider"></div>
+
+        <!-- Dates -->
+        <div class="pos-filter-group">
+            <span class="pos-filter-label">From</span>
+            <input type="date" name="date_from" class="pos-filter-control" style="min-width:120px;" value="{{ f_date_from }}">
+        </div>
+        <div class="pos-filter-group">
+            <span class="pos-filter-label">To</span>
+            <input type="date" name="date_to" class="pos-filter-control" style="min-width:120px;" value="{{ f_date_to }}">
+        </div>
+
+        <div class="pos-filter-divider"></div>
+
+        <!-- Actions -->
+        <div class="pos-filter-group" style="margin-left:auto;">
+            <button type="submit" class="btn btn-primary btn-sm px-3" style="height:30px;">
+                <i class="bi bi-search"></i> Filter
+            </button>
+            <a href="{% url 'trade:position_list' %}" class="btn btn-outline-secondary btn-sm px-3" style="height:30px;line-height:18px;">
+                <i class="bi bi-x-circle"></i> Clear
+            </a>
+        </div>
+    </div>
+</form>
+
+<!-- ── Active filter chips ────────────────────────────────────────────────────── -->
+{% if selected_portfolios or selected_securities or selected_pos_types or selected_src_systems or f_position_basis %}
+<div class="pos-active-filters">
+    <span class="pos-chip-label">Active filters:</span>
+    {% for p in selected_portfolios %}
+    <span class="pos-chip">
+        <i class="bi bi-briefcase" style="font-size:.65rem;"></i> {{ p }}
+        <span class="chip-x" onclick="removePortfolioFilter('{{ p }}')">✕</span>
+    </span>
+    {% endfor %}
+    {% for s in selected_securities %}
+    <span class="pos-chip" style="background:#f0fdf4;border-color:#bbf7d0;color:#15803d;">
+        <i class="bi bi-file-earmark-text" style="font-size:.65rem;"></i> {{ s }}
+        <span class="chip-x" onclick="removeSecurityFilter('{{ s }}')">✕</span>
+    </span>
+    {% endfor %}
+    {% for t in selected_pos_types %}
+    <span class="pos-chip" style="background:#faf5ff;border-color:#e9d5ff;color:#7c3aed;">
+        {{ t }}
+        <span class="chip-x" onclick="removePosTypeFilter('{{ t }}')">✕</span>
+    </span>
+    {% endfor %}
+    {% for s in selected_src_systems %}
+    <span class="pos-chip" style="background:#fff7ed;border-color:#fed7aa;color:#c2410c;">
+        {{ s }}
+        <span class="chip-x" onclick="removeSrcFilter('{{ s }}')">✕</span>
+    </span>
+    {% endfor %}
+    {% if f_position_basis %}
+    <span class="pos-chip" style="background:#f0f9ff;border-color:#bae6fd;color:#0369a1;">
+        {{ f_position_basis }}
+        <span class="chip-x" onclick="removeBasisFilter()">✕</span>
+    </span>
+    {% endif %}
+</div>
+{% endif %}
+
+<!-- Table -->
+<div class="card">
+    <div class="card-body p-0">
+        {% if positions %}
+        <div class="table-responsive" style="max-height: 65vh; overflow-y: auto;">
+            <table class="table table-hover table-sm mb-0 pos-table" style="width: max-content; min-width: 100%;">
+                <thead class="table-light" style="position: sticky; top: 0; z-index: 10;">
+                    <tr>
+                        {% with sb=sort_by sd=sort_dir %}
+                        <th class="sort-th {% if sb == 'portfolio' %}sorted-{{ sd|lower }}{% endif %}"
+                            style="min-width:120px; position:sticky; left:0; background:#f8f9fa; z-index:11;"
+                            onclick="sortBy('portfolio')">
+                            Portfolio <span class="sort-icon"></span>
+                        </th>
+                        <th class="sort-th {% if sb == 'revaluation_status' %}sorted-{{ sd|lower }}{% endif %}"
+                            style="min-width:70px;" onclick="sortBy('revaluation_status')">
+                            Reval <span class="sort-icon"></span>
+                        </th>
+                        <th class="sort-th {% if sb == 'security_label' %}sorted-{{ sd|lower }}{% endif %}"
+                            style="min-width:180px;" onclick="sortBy('security_label')">
+                            Security <span class="sort-icon"></span>
+                        </th>
+                        <th class="sort-th {% if sb == 'isin' %}sorted-{{ sd|lower }}{% endif %}"
+                            style="min-width:100px;" onclick="sortBy('isin')">
+                            ISIN <span class="sort-icon"></span>
+                        </th>
+                        <th class="sort-th {% if sb == 'position_basis' %}sorted-{{ sd|lower }}{% endif %}"
+                            style="min-width:100px;" onclick="sortBy('position_basis')">
+                            Basis <span class="sort-icon"></span>
+                        </th>
+                        <th class="sort-th {% if sb == 'position_date' %}sorted-{{ sd|lower }}{% endif %}"
+                            style="min-width:105px;" onclick="sortBy('position_date')">
+                            Pos Date <span class="sort-icon"></span>
+                        </th>
+                        <th class="sort-th {% if sb == 'src_system' %}sorted-{{ sd|lower }}{% endif %}"
+                            style="min-width:75px;" onclick="sortBy('src_system')">
+                            Src <span class="sort-icon"></span>
+                        </th>
+                        <th class="sort-th {% if sb == 'position_type' %}sorted-{{ sd|lower }}{% endif %}"
+                            style="min-width:80px;" onclick="sortBy('position_type')">
+                            Type <span class="sort-icon"></span>
+                        </th>
+                        <th style="min-width:80px;" title="Whether this is the current/authoritative version for its natural key (portfolio + security + basis + date)">
+                            Latest
+                        </th>
+                        <th class="sort-th text-end {% if sb == 'quantity' %}sorted-{{ sd|lower }}{% endif %}"
+                            style="min-width:110px;" onclick="sortBy('quantity')">
+                            Quantity <span class="sort-icon"></span>
+                        </th>
+                        <th class="sort-th text-end {% if sb == 'average_cost_fc' %}sorted-{{ sd|lower }}{% endif %}"
+                            style="min-width:110px;" onclick="sortBy('average_cost_fc')">
+                            Avg Cost FC <span class="sort-icon"></span>
+                        </th>
+                        <th class="sort-th text-end {% if sb == 'cost_fc' %}sorted-{{ sd|lower }}{% endif %}"
+                            style="min-width:110px;" onclick="sortBy('cost_fc')">
+                            Cost FC <span class="sort-icon"></span>
+                        </th>
+                        <th class="sort-th text-end {% if sb == 'cost_lc' %}sorted-{{ sd|lower }}{% endif %}"
+                            style="min-width:110px;" onclick="sortBy('cost_lc')">
+                            Cost LC <span class="sort-icon"></span>
+                        </th>
+                        <th class="sort-th text-end {% if sb == 'market_value_fc' %}sorted-{{ sd|lower }}{% endif %}"
+                            style="min-width:120px;" onclick="sortBy('market_value_fc')">
+                            Mkt Val FC <span class="sort-icon"></span>
+                        </th>
+                        <th class="sort-th text-end {% if sb == 'market_value_lc' %}sorted-{{ sd|lower }}{% endif %}"
+                            style="min-width:120px;" onclick="sortBy('market_value_lc')">
+                            Mkt Val LC <span class="sort-icon"></span>
+                        </th>
+                        <th class="sort-th text-end {% if sb == 'net_book_value_fc' %}sorted-{{ sd|lower }}{% endif %}"
+                            style="min-width:110px;" onclick="sortBy('net_book_value_fc')">
+                            NBV FC <span class="sort-icon"></span>
+                        </th>
+                        <th class="sort-th text-end {% if sb == 'unrealized_pnl_fc' %}sorted-{{ sd|lower }}{% endif %}"
+                            style="min-width:120px;" onclick="sortBy('unrealized_pnl_fc')">
+                            Unreal PnL FC <span class="sort-icon"></span>
+                        </th>
+                        <th class="sort-th text-end {% if sb == 'unrealized_pnl_lc' %}sorted-{{ sd|lower }}{% endif %}"
+                            style="min-width:120px;" onclick="sortBy('unrealized_pnl_lc')">
+                            Unreal PnL LC <span class="sort-icon"></span>
+                        </th>
+                        <th class="sort-th text-end {% if sb == 'realized_pnl_fc' %}sorted-{{ sd|lower }}{% endif %}"
+                            style="min-width:110px;" onclick="sortBy('realized_pnl_fc')">
+                            Real PnL FC <span class="sort-icon"></span>
+                        </th>
+                        <th class="sort-th text-end {% if sb == 'provision_fc' %}sorted-{{ sd|lower }}{% endif %}"
+                            style="min-width:100px;" onclick="sortBy('provision_fc')">
+                            Provision FC <span class="sort-icon"></span>
+                        </th>
+                        <th class="sort-th text-end {% if sb == 'provision_lc' %}sorted-{{ sd|lower }}{% endif %}"
+                            style="min-width:100px;" onclick="sortBy('provision_lc')">
+                            Provision LC <span class="sort-icon"></span>
+                        </th>
+                        <th class="sort-th text-end {% if sb == 'dividend_fc' %}sorted-{{ sd|lower }}{% endif %}"
+                            style="min-width:100px;" onclick="sortBy('dividend_fc')">
+                            Dividend FC <span class="sort-icon"></span>
+                        </th>
+                        <th class="sort-th text-end {% if sb == 'uncall_fc' %}sorted-{{ sd|lower }}{% endif %}"
+                            style="min-width:100px;" onclick="sortBy('uncall_fc')">
+                            Uncall FC <span class="sort-icon"></span>
+                        </th>
+                        <th class="sort-th text-end {% if sb == 'uncall_lc' %}sorted-{{ sd|lower }}{% endif %}"
+                            style="min-width:100px;" onclick="sortBy('uncall_lc')">
+                            Uncall LC <span class="sort-icon"></span>
+                        </th>
+                        <th class="sort-th text-end {% if sb == 'pipeline_fc' %}sorted-{{ sd|lower }}{% endif %}"
+                            style="min-width:100px;" onclick="sortBy('pipeline_fc')">
+                            Pipeline FC <span class="sort-icon"></span>
+                        </th>
+                        <th class="sort-th {% if sb == 'processing_date' %}sorted-{{ sd|lower }}{% endif %}"
+                            style="min-width:100px;" onclick="sortBy('processing_date')">
+                            Proc Date <span class="sort-icon"></span>
+                        </th>
+                        <th class="sort-th {% if sb == 'processing_timestamp' %}sorted-{{ sd|lower }}{% endif %}"
+                            style="min-width:140px;" onclick="sortBy('processing_timestamp')">
+                            Proc Timestamp <span class="sort-icon"></span>
+                        </th>
+                        {% endwith %}
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for p in positions %}
+                    <tr class="{% if p.is_latest == False %}table-secondary opacity-75{% endif %}">
+                        <td style="position:sticky; left:0; background:#fff; z-index:1;">
+                            {% if p.portfolio %}
+                                <a href="{% url 'portfolio:detail' p.portfolio %}" class="text-primary fw-semibold">
+                                    {{ p.portfolio }}
+                                </a>
+                            {% else %}
+                                <strong class="text-muted">-</strong>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if p.revaluation_status %}
+                                {% with rs=p.revaluation_status|upper %}
+                                <span class="badge {% if 'NON' not in rs %}bg-success{% else %}bg-secondary{% endif %}"
+                                      title="{{ p.revaluation_status }}">
+                                    {% if 'NON' in rs %}NR{% else %}R{% endif %}
+                                </span>
+                                {% endwith %}
+                            {% else %}
+                                <span class="text-muted small">-</span>
+                            {% endif %}
+                        </td>
+                        <td style="max-width:180px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;"
+                            title="{{ p.security_label }}">
+                            {% if p.security_label %}
+                                {% if p.security_id %}
+                                    <a href="{% url 'security:detail' p.security_id %}" class="text-primary fw-semibold">
+                                        {{ p.security_label }}
+                                    </a>
+                                {% else %}
+                                    <a href="{% url 'security:list' %}?search={{ p.security_label|urlencode }}" class="text-primary fw-semibold">
+                                        {{ p.security_label }}
+                                    </a>
+                                {% endif %}
+                            {% else %}
+                                <span class="text-muted">-</span>
+                            {% endif %}
+                        </td>
+                        <td><code class="small">{{ p.isin|default:"-" }}</code></td>
+                        <td>
+                            {% if p.position_basis == 'TRADED' %}
+                                <span class="badge bg-primary">Traded</span>
+                            {% elif p.position_basis == 'SETTLED' %}
+                                <span class="badge bg-success">Settled</span>
+                            {% else %}
+                                <span class="badge bg-secondary">{{ p.position_basis|default:"-" }}</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ p.position_date|default:"-" }}</td>
+                        <td><span class="badge bg-light text-dark">{{ p.src_system|default:"-" }}</span></td>
+                        <td>
+                            {% if p.position_type == 'INT' %}
+                                <span class="badge bg-primary">INT</span>
+                            {% elif p.position_type == 'EOD' %}
+                                <span class="badge bg-success">EOD</span>
+                            {% elif p.position_type == 'SOD' %}
+                                <span class="badge bg-warning text-dark">SOD</span>
+                            {% elif p.position_type == 'CORR' %}
+                                <span class="badge bg-info text-dark">CORR</span>
+                            {% else %}
+                                <span class="badge bg-secondary">{{ p.position_type|default:"-" }}</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if p.is_latest == False %}
+                                <span class="badge bg-secondary" title="Superseded — an older version, no longer authoritative">Prior</span>
+                            {% else %}
+                                <span class="badge bg-success" title="Current authoritative version for this natural key">Latest</span>
+                            {% endif %}
+                        </td>
+                        <td class="text-end num">{{ p.quantity|default:0|floatformat:4|intcomma }}</td>
+                        <td class="text-end num">{{ p.average_cost_fc|default:0|floatformat:8|intcomma }}</td>
+                        <td class="text-end num">{{ p.cost_fc|default:0|floatformat:2|intcomma }}</td>
+                        <td class="text-end num">{{ p.cost_lc|default:0|floatformat:2|intcomma }}</td>
+                        <td class="text-end num fw-semibold">{{ p.market_value_fc|default:0|floatformat:2|intcomma }}</td>
+                        <td class="text-end num fw-semibold">{{ p.market_value_lc|default:0|floatformat:2|intcomma }}</td>
+                        <td class="text-end num">{{ p.net_book_value_fc|default:0|floatformat:2|intcomma }}</td>
+                        <td class="text-end num {% if p.unrealized_pnl_fc > 0 %}text-success fw-bold{% elif p.unrealized_pnl_fc < 0 %}text-danger fw-bold{% endif %}">
+                            {{ p.unrealized_pnl_fc|default:0|floatformat:2|intcomma }}
+                        </td>
+                        <td class="text-end num {% if p.unrealized_pnl_lc > 0 %}text-success{% elif p.unrealized_pnl_lc < 0 %}text-danger{% endif %}">
+                            {{ p.unrealized_pnl_lc|default:0|floatformat:2|intcomma }}
+                        </td>
+                        <td class="text-end num">{{ p.realized_pnl_fc|default:0|floatformat:2|intcomma }}</td>
+                        <td class="text-end num">{{ p.provision_fc|default:0|floatformat:2|intcomma }}</td>
+                        <td class="text-end num">{{ p.provision_lc|default:0|floatformat:2|intcomma }}</td>
+                        <td class="text-end num">{{ p.dividend_fc|default:0|floatformat:2|intcomma }}</td>
+                        <td class="text-end num">{{ p.uncall_fc|default:0|floatformat:2|intcomma }}</td>
+                        <td class="text-end num">{{ p.uncall_lc|default:0|floatformat:2|intcomma }}</td>
+                        <td class="text-end num">{{ p.pipeline_fc|default:0|floatformat:2|intcomma }}</td>
+                        <td class="small text-muted">{{ p.processing_date|default:"-" }}</td>
+                        <td class="small text-muted" style="white-space:nowrap;">{{ p.processing_timestamp|default:"-" }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Pagination -->
+        {% if total_pages > 1 %}
+        <div class="d-flex justify-content-between align-items-center px-3 py-2 border-top">
+            <div class="text-muted small">
+                Showing {{ positions|length }} of {{ total }} records
+                &nbsp;|&nbsp; Page {{ page }} of {{ total_pages }}
+            </div>
+            <nav>
+                <ul class="pagination pagination-sm mb-0">
+                    {% if page > 1 %}
+                    <li class="page-item">
+                        <a class="page-link" href="?{{ base_qs }}&page={{ page_prev }}">&laquo;</a>
+                    </li>
+                    {% endif %}
+                    {% for p in page_range %}
+                    <li class="page-item {% if p == page %}active{% endif %}">
+                        <a class="page-link" href="?{{ base_qs }}&page={{ p }}">{{ p }}</a>
+                    </li>
+                    {% endfor %}
+                    {% if page < total_pages %}
+                    <li class="page-item">
+                        <a class="page-link" href="?{{ base_qs }}&page={{ page_next }}">&raquo;</a>
+                    </li>
+                    {% endif %}
+                </ul>
+            </nav>
+        </div>
+        {% endif %}
+
+        {% else %}
+        <div class="text-center py-5 text-muted">
+            <i class="bi bi-pie-chart" style="font-size: 3rem; opacity: 0.3;"></i>
+            <p class="mt-3 mb-1">No positions found</p>
+            <p class="small">Adjust your filters and try again.</p>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Portfolio Selection Modal -->
+<div class="modal fade" id="portfolioModal" tabindex="-1" aria-labelledby="portfolioModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="portfolioModalLabel">
+                    <i class="bi bi-briefcase text-primary"></i> Select Portfolios
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <div class="input-group">
+                        <span class="input-group-text"><i class="bi bi-search"></i></span>
+                        <input type="text" class="form-control" id="portfolioModalSearch" placeholder="Search portfolios...">
+                    </div>
+                </div>
+                <div class="mb-3 d-flex gap-2">
+                    <button type="button" class="btn btn-sm btn-outline-primary" onclick="selectAllPortfolios()">
+                        <i class="bi bi-check-all"></i> Select All
+                    </button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" onclick="clearAllPortfolios()">
+                        <i class="bi bi-x-circle"></i> Clear All
+                    </button>
+                    <span class="ms-auto text-muted" id="portfolioSelectedCount">0 selected</span>
+                </div>
+                <div class="table-responsive" style="max-height: 400px;">
+                    <table class="table table-hover table-sm">
+                        <thead class="table-light" style="position: sticky; top: 0;">
+                            <tr>
+                                <th style="width: 40px;">
+                                    <input type="checkbox" class="form-check-input" id="portfolioSelectAllCheckbox"
+                                           onchange="toggleAllPortfolioCheckboxes(this)">
+                                </th>
+                                <th>Portfolio Name</th>
+                                <th>Full Name</th>
+                                <th>Currency</th>
+                                <th>Manager</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="portfolioModalTableBody">
+                            <tr><td colspan="6" class="text-center py-4">
+                                <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
+                                <span class="ms-2">Loading portfolios...</span>
+                            </td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="applyPortfolioSelection()">
+                    <i class="bi bi-check"></i> Apply Selection
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Security Selection Modal -->
+<div class="modal fade" id="securityModal" tabindex="-1" aria-labelledby="securityModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="securityModalLabel">
+                    <i class="bi bi-file-earmark-text text-success"></i> Select Securities
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <div class="input-group">
+                        <span class="input-group-text"><i class="bi bi-search"></i></span>
+                        <input type="text" class="form-control" id="securityModalSearch"
+                               placeholder="Search by label, ISIN, ticker, issuer...">
+                    </div>
+                </div>
+                <div class="mb-3 d-flex gap-2">
+                    <button type="button" class="btn btn-sm btn-outline-primary" onclick="selectAllSecurities()">
+                        <i class="bi bi-check-all"></i> Select All
+                    </button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" onclick="clearAllSecurities()">
+                        <i class="bi bi-x-circle"></i> Clear All
+                    </button>
+                    <span class="ms-auto text-muted" id="securitySelectedCount">0 selected</span>
+                </div>
+                <div class="table-responsive" style="max-height: 400px;">
+                    <table class="table table-hover table-sm">
+                        <thead class="table-light" style="position: sticky; top: 0;">
+                            <tr>
+                                <th style="width: 40px;">
+                                    <input type="checkbox" class="form-check-input" id="securitySelectAllCheckbox"
+                                           onchange="toggleAllSecurityCheckboxes(this)">
+                                </th>
+                                <th>Security Label</th>
+                                <th>Full Name</th>
+                                <th>Type</th>
+                                <th>ISIN</th>
+                                <th>Ticker</th>
+                                <th>Currency</th>
+                                <th>Issuer</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="securityModalTableBody">
+                            <tr><td colspan="9" class="text-center py-4">
+                                <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
+                                <span class="ms-2">Loading securities...</span>
+                            </td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="applySecuritySelection()">
+                    <i class="bi bi-check"></i> Apply Selection
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// ── Sort ──────────────────────────────────────────────────────────────────────
+const CURRENT_SORT_BY  = '{{ sort_by }}';
+const CURRENT_SORT_DIR = '{{ sort_dir }}';
+
+function sortBy(col) {
+    const params = new URLSearchParams(window.location.search);
+    const curDir = params.get('sort_dir') || 'DESC';
+    // Toggle direction if clicking same column, otherwise default to ASC
+    const newDir = (params.get('sort_by') === col && curDir === 'ASC') ? 'DESC' : 'ASC';
+    params.set('sort_by', col);
+    params.set('sort_dir', newDir);
+    params.delete('page');   // reset to page 1 on sort change
+    window.location.search = params.toString();
+}
+
+// ── Portfolio Modal ───────────────────────────────────────────────────────────
+let portfolioData = [];
+let securityData  = [];
+let selectedPortfolios = new Set([{% for p in selected_portfolios %}'{{ p|escapejs }}',{% endfor %}]);
+let selectedSecurities = new Set([{% for s in selected_securities %}'{{ s|escapejs }}',{% endfor %}]);
+
+document.getElementById('portfolioModal').addEventListener('show.bs.modal', loadPortfolios);
+
+function loadPortfolios() {
+    const tbody = document.getElementById('portfolioModalTableBody');
+    tbody.innerHTML = `<tr><td colspan="6" class="text-center py-4">
+        <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
+        <span class="ms-2">Loading...</span></td></tr>`;
+    fetch(`{% url 'trade:api_portfolios_detailed' %}`)
+        .then(r => r.json())
+        .then(data => { portfolioData = data.results || []; renderPortfolioTable(); })
+        .catch(() => {
+            tbody.innerHTML = `<tr><td colspan="6" class="text-center py-4 text-danger">
+                <i class="bi bi-exclamation-triangle"></i> Error loading portfolios</td></tr>`;
+        });
+}
+
+function renderPortfolioTable() {
+    const tbody = document.getElementById('portfolioModalTableBody');
+    const term  = document.getElementById('portfolioModalSearch').value.toLowerCase();
+    const filtered = portfolioData.filter(p =>
+        `${p.portfolio_short_name} ${p.portfolio_full_name} ${p.currency} ${p.manager}`.toLowerCase().includes(term)
+    );
+    if (!filtered.length) {
+        tbody.innerHTML = `<tr><td colspan="6" class="text-center py-4 text-muted"><i class="bi bi-inbox"></i> No portfolios found</td></tr>`;
+        updatePortfolioCount(); return;
+    }
+    tbody.innerHTML = filtered.map(p => `
+        <tr onclick="togglePortfolioCheckbox('${p.portfolio_short_name}')" style="cursor:pointer;">
+            <td><input type="checkbox" class="form-check-input portfolio-checkbox" data-name="${p.portfolio_short_name}"
+                ${selectedPortfolios.has(p.portfolio_short_name) ? 'checked' : ''}
+                onclick="event.stopPropagation(); togglePortfolioSelection('${p.portfolio_short_name}')"></td>
+            <td><strong>${p.portfolio_short_name || '-'}</strong></td>
+            <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${p.portfolio_full_name || '-'}</td>
+            <td><span class="badge bg-info">${p.currency || '-'}</span></td>
+            <td>${p.manager || '-'}</td>
+            <td><span class="badge bg-secondary">${p.status || '-'}</span></td>
+        </tr>`).join('');
+    updatePortfolioCount();
+}
+
+function togglePortfolioCheckbox(name) {
+    const cb = document.querySelector(`.portfolio-checkbox[data-name="${name}"]`);
+    if (cb) { cb.checked = !cb.checked; togglePortfolioSelection(name); }
+}
+function togglePortfolioSelection(name) {
+    if (selectedPortfolios.has(name)) selectedPortfolios.delete(name); else selectedPortfolios.add(name);
+    updatePortfolioCount();
+}
+function updatePortfolioCount() {
+    document.getElementById('portfolioSelectedCount').textContent = `${selectedPortfolios.size} selected`;
+}
+function selectAllPortfolios() {
+    const term = document.getElementById('portfolioModalSearch').value.toLowerCase();
+    portfolioData.filter(p =>
+        `${p.portfolio_short_name} ${p.portfolio_full_name} ${p.currency} ${p.manager}`.toLowerCase().includes(term)
+    ).forEach(p => selectedPortfolios.add(p.portfolio_short_name));
+    renderPortfolioTable();
+}
+function clearAllPortfolios() {
+    const term = document.getElementById('portfolioModalSearch').value.toLowerCase();
+    portfolioData.filter(p =>
+        `${p.portfolio_short_name} ${p.portfolio_full_name} ${p.currency} ${p.manager}`.toLowerCase().includes(term)
+    ).forEach(p => selectedPortfolios.delete(p.portfolio_short_name));
+    renderPortfolioTable();
+}
+function toggleAllPortfolioCheckboxes(cb) { if (cb.checked) selectAllPortfolios(); else clearAllPortfolios(); }
+function applyPortfolioSelection() {
+    const c = document.getElementById('selectedPortfoliosInputs');
+    c.innerHTML = '';
+    selectedPortfolios.forEach(name => {
+        const i = document.createElement('input');
+        i.type = 'hidden'; i.name = 'portfolios'; i.value = name; c.appendChild(i);
+    });
+    document.getElementById('selectedPortfoliosLabel').textContent =
+        selectedPortfolios.size > 0 ? `${selectedPortfolios.size} selected` : 'All Portfolios';
+    bootstrap.Modal.getInstance(document.getElementById('portfolioModal')).hide();
+}
+function removePortfolioFilter(name) {
+    selectedPortfolios.delete(name);
+    document.querySelectorAll(`#selectedPortfoliosInputs input[value="${name}"]`).forEach(i => i.remove());
+    document.getElementById('positionFilterForm').submit();
+}
+document.getElementById('portfolioModalSearch').addEventListener('input', renderPortfolioTable);
+
+// ── Security Modal ────────────────────────────────────────────────────────────
+document.getElementById('securityModal').addEventListener('show.bs.modal', loadSecurities);
+
+function loadSecurities() {
+    const tbody = document.getElementById('securityModalTableBody');
+    tbody.innerHTML = `<tr><td colspan="9" class="text-center py-4">
+        <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
+        <span class="ms-2">Loading...</span></td></tr>`;
+    fetch(`{% url 'trade:api_securities_detailed' %}`)
+        .then(r => r.json())
+        .then(data => { securityData = data.results || []; renderSecurityTable(); })
+        .catch(() => {
+            tbody.innerHTML = `<tr><td colspan="9" class="text-center py-4 text-danger">
+                <i class="bi bi-exclamation-triangle"></i> Error loading securities</td></tr>`;
+        });
+}
+
+function renderSecurityTable() {
+    const tbody = document.getElementById('securityModalTableBody');
+    const term  = document.getElementById('securityModalSearch').value.toLowerCase();
+    const filtered = securityData.filter(s =>
+        `${s.security_label} ${s.security_name} ${s.isin} ${s.ticker} ${s.issuer}`.toLowerCase().includes(term)
+    );
+    if (!filtered.length) {
+        tbody.innerHTML = `<tr><td colspan="9" class="text-center py-4 text-muted"><i class="bi bi-inbox"></i> No securities found</td></tr>`;
+        updateSecurityCount(); return;
+    }
+    tbody.innerHTML = filtered.map(s => `
+        <tr onclick="toggleSecurityCheckbox('${s.security_label}')" style="cursor:pointer;">
+            <td><input type="checkbox" class="form-check-input security-checkbox" data-label="${s.security_label}"
+                ${selectedSecurities.has(s.security_label) ? 'checked' : ''}
+                onclick="event.stopPropagation(); toggleSecuritySelection('${s.security_label}')"></td>
+            <td><strong>${s.security_label || '-'}</strong></td>
+            <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${s.security_name || '-'}</td>
+            <td>${s.security_type || '-'}</td>
+            <td><code class="small">${s.isin || '-'}</code></td>
+            <td>${s.ticker || '-'}</td>
+            <td><span class="badge bg-info">${s.currency_code || '-'}</span></td>
+            <td>${s.issuer || '-'}</td>
+            <td><span class="badge bg-secondary">${s.status || '-'}</span></td>
+        </tr>`).join('');
+    updateSecurityCount();
+}
+
+function toggleSecurityCheckbox(label) {
+    const cb = document.querySelector(`.security-checkbox[data-label="${label}"]`);
+    if (cb) { cb.checked = !cb.checked; toggleSecuritySelection(label); }
+}
+function toggleSecuritySelection(label) {
+    if (selectedSecurities.has(label)) selectedSecurities.delete(label); else selectedSecurities.add(label);
+    updateSecurityCount();
+}
+function updateSecurityCount() {
+    document.getElementById('securitySelectedCount').textContent = `${selectedSecurities.size} selected`;
+}
+function selectAllSecurities() {
+    const term = document.getElementById('securityModalSearch').value.toLowerCase();
+    securityData.filter(s =>
+        `${s.security_label} ${s.security_name} ${s.isin} ${s.ticker} ${s.issuer}`.toLowerCase().includes(term)
+    ).forEach(s => selectedSecurities.add(s.security_label));
+    renderSecurityTable();
+}
+function clearAllSecurities() {
+    const term = document.getElementById('securityModalSearch').value.toLowerCase();
+    securityData.filter(s =>
+        `${s.security_label} ${s.security_name} ${s.isin} ${s.ticker} ${s.issuer}`.toLowerCase().includes(term)
+    ).forEach(s => selectedSecurities.delete(s.security_label));
+    renderSecurityTable();
+}
+function toggleAllSecurityCheckboxes(cb) { if (cb.checked) selectAllSecurities(); else clearAllSecurities(); }
+function applySecuritySelection() {
+    const c = document.getElementById('selectedSecuritiesInputs');
+    c.innerHTML = '';
+    selectedSecurities.forEach(label => {
+        const i = document.createElement('input');
+        i.type = 'hidden'; i.name = 'securities'; i.value = label; c.appendChild(i);
+    });
+    document.getElementById('selectedSecuritiesLabel').textContent =
+        selectedSecurities.size > 0 ? `${selectedSecurities.size} selected` : 'All Securities';
+    bootstrap.Modal.getInstance(document.getElementById('securityModal')).hide();
+}
+function removeSecurityFilter(label) {
+    selectedSecurities.delete(label);
+    document.querySelectorAll(`#selectedSecuritiesInputs input[value="${label}"]`).forEach(i => i.remove());
+    document.getElementById('positionFilterForm').submit();
+}
+document.getElementById('securityModalSearch').addEventListener('input', renderSecurityTable);
+
+// ── Src System multi-select ───────────────────────────────────────────────────
+function updateSrcSystem() {
+    const checked = [...document.querySelectorAll('.src-system-cb:checked')].map(cb => cb.value);
+    const container = document.getElementById('srcSystemInputs');
+    container.innerHTML = '';
+    checked.forEach(v => {
+        const i = document.createElement('input');
+        i.type = 'hidden'; i.name = 'src_system'; i.value = v;
+        container.appendChild(i);
+    });
+    document.getElementById('srcSystemLabel').textContent =
+        checked.length > 0 ? `${checked.length} selected` : 'All';
+}
+function clearSrcSystems() {
+    document.querySelectorAll('.src-system-cb').forEach(cb => cb.checked = false);
+    updateSrcSystem();
+}
+function removeSrcFilter(s) {
+    const cb = document.querySelector(`.src-system-cb[value="${s}"]`);
+    if (cb) cb.checked = false;
+    document.querySelectorAll(`#srcSystemInputs input[value="${s}"]`).forEach(i => i.remove());
+    document.getElementById('positionFilterForm').submit();
+}
+function removeBasisFilter() {
+    document.querySelector('select[name="position_basis"]').value = '';
+    document.getElementById('positionFilterForm').submit();
+}
+
+// ── Position Type multi-select ────────────────────────────────────────────────
+function updatePosType() {
+    const checked = [...document.querySelectorAll('.pos-type-cb:checked')].map(cb => cb.value);
+    const container = document.getElementById('posTypeInputs');
+    container.innerHTML = '';
+    checked.forEach(v => {
+        const i = document.createElement('input');
+        i.type = 'hidden'; i.name = 'position_type'; i.value = v;
+        container.appendChild(i);
+    });
+    document.getElementById('posTypeLabel').textContent =
+        checked.length > 0 ? `${checked.length} selected` : 'All';
+    // If user manually selects types, clear the "show all" sentinel
+    if (checked.length > 0) document.getElementById('posTypeCleared').value = '0';
+}
+function clearPosTypes() {
+    document.querySelectorAll('.pos-type-cb').forEach(cb => cb.checked = false);
+    document.getElementById('posTypeCleared').value = '1';
+    updatePosType();
+}
+function removePosTypeFilter(t) {
+    const cb = document.querySelector(`.pos-type-cb[value="${t}"]`);
+    if (cb) cb.checked = false;
+    document.querySelectorAll(`#posTypeInputs input[value="${t}"]`).forEach(i => i.remove());
+    document.getElementById('positionFilterForm').submit();
+}
+</script>
+{% endblock %}
